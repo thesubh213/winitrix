@@ -1,5 +1,7 @@
 #define MyAppName "Winitrix"
-#define MyAppVersion "0.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "Winitrix"
 #define MyAppURL "https://github.com/thesubh213/winitrix"
 #define MyAppExeName "winitrix.exe"
@@ -14,22 +16,22 @@ DefaultDirName={localappdata}\Winitrix
 DefaultGroupName=Winitrix
 DisableProgramGroupPage=yes
 OutputBaseFilename=winitrix-setup-{#MyAppVersion}
-OutputDir=dist
+OutputDir=..\dist
 Compression=lzma
 SolidCompression=yes
 ChangesEnvironment=yes
 PrivilegesRequired=lowest
 WizardStyle=modern
-LicenseFile=LICENSE
+LicenseFile=..\LICENSE
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: unchecked
 Name: "addtopath"; Description: "Add Winitrix to &PATH"; Flags: checkedonce
 
 [Files]
-Source: "dist\winitrix.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
-Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\winitrix.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{userprograms}\Winitrix"; Filename: "{app}\{#MyAppExeName}"
