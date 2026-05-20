@@ -17,7 +17,6 @@ var (
 	retryBackoff    bool
 	maxRetryDelay   int
 
-	activeConfig   config.Config
 	activeSettings config.EffectiveSettings
 	configFound    bool
 )
@@ -35,7 +34,6 @@ func loadSettings(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	activeConfig = cfg
 	configFound = found
 
 	profile := config.ResolveProfile(cfg, profileName)

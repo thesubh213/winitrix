@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -79,7 +78,6 @@ type Model struct {
 	currentStart       time.Time
 	ctx                context.Context
 	cancelCtx          context.CancelFunc
-	currentCmd         *exec.Cmd // Reference to cancel running command
 	progressRelay      *ProgressRelay
 	pendingFailure     *UpdateMsg
 	selectIdx          int
