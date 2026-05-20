@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2026-05-15
+## [1.0.0] - 2026-05-20
 
 ### Added
 - **Core Architecture**: Initial release of the Winitrix Unified Windows Package Orchestration Engine.
@@ -18,28 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pre-flight Diagnostics**: `winitrix doctor` now performs a DNS network connectivity ping and checks the `PATH` variable for corruption.
 - **Security & Privacy**: Offline-first architecture. Zero telemetry. Zero hidden scripts.
 - **CI/CD Integration**: Automated GitHub Actions pipelines for deterministic builds and release packaging.
-
-### Security
-- Integrated UAC elevation detection utilizing `ShellExecute` to automatically elevate the application safely when modifying global package managers.
-
-## [Unreleased]
-
-### Added
-- Windows installer (Inno Setup) with PATH task, shortcuts, and uninstall entry.
-- Portable first-run auto-install to copy the EXE into `%LOCALAPPDATA%\Winitrix\bin` and add it to user PATH.
-- Manager filters (`--only`, `--exclude`) and retry controls (`--retries`, `--retry-delay`).
-- TOML configuration with profiles and defaults (`winitrix config init`).
-- Structured JSON reports with per-manager durations and error categories.
-- Run state cache for ETAs (`state.json`) and last report cache (`last_report.json`).
-- Interactive manager selection UI (`--select`).
-- Task Scheduler helper command (`winitrix schedule`).
-- Desktop completion notifications (`--notify`).
-- Diagnostic bundle support (`winitrix logs --bundle`).
+- **Windows Installer**: Built Inno Setup compiler integration with auto-PATH configuration, desktop/menu shortcuts, and clean uninstallation.
+- **Portable first-run auto-install**: Auto-copies the EXE into `%LOCALAPPDATA%\Winitrix\bin` and adds it to user PATH on first double-click.
+- **Manager filters & retries**: Command-line controls for `--only`, `--exclude`, `--retries`, `--retry-delay`, and exponential backoff (`--retry-backoff`).
+- **TOML configuration**: Local custom profiles and configurations via `winitrix config init`.
+- **Structured JSON reports**: Auto-generated run-state history (`state.json`) and run reports (`last_report.json`).
+- **Task Scheduler**: Built-in scheduling setup via `winitrix schedule`.
+- **Desktop notifications**: Integration with Windows Action Center (`--notify`).
+- **Diagnostic bundle**: Run `winitrix logs --bundle` to generate compressed logs for diagnostics.
 
 ### Changed
 - Structured progress parsing across more provider outputs, shown in the TUI.
 - Release workflow now builds and publishes the setup EXE.
-- Retry logic now supports optional exponential backoff (`--retry-backoff`).
 
 ### Fixed
 - Windows-only code paths now isolated with build tags and non-Windows stubs to avoid cross-platform compile errors.
+
+### Security
+- Integrated UAC elevation detection utilizing `ShellExecute` to automatically elevate the application safely when modifying global package managers.
