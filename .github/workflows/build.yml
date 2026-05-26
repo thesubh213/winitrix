@@ -24,8 +24,10 @@ jobs:
         cache-dependency-path: go.sum
 
     - name: Verify Dependencies
-      shell: bash
-      run: go mod tidy -diff
+      shell: pwsh
+      run: |
+        go mod tidy
+        git diff --ignore-cr-at-eol --exit-code -- go.mod go.sum
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6

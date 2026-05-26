@@ -27,7 +27,8 @@ jobs:
     - name: Validate
       shell: pwsh
       run: |
-        go mod tidy -diff
+        go mod tidy
+        git diff --ignore-cr-at-eol --exit-code -- go.mod go.sum
         go vet ./...
         $goArch = (go env GOARCH).Trim()
         if ($goArch -eq 'amd64') {
