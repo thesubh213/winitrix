@@ -25,11 +25,16 @@ jobs:
         cache-dependency-path: go.sum
 
     - name: Validate
-      shell: bash
+      shell: pwsh
       run: |
         go mod tidy -diff
         go vet ./...
-        go test -mod=readonly -race ./...
+        $goArch = (go env GOARCH).Trim()
+        if ($goArch -eq 'amd64') {
+          go test -mod=readonly -v -race ./...
+        } else {
+          go test -mod=readonly -v ./...
+        }
 
     - name: Get Version info
       id: vars

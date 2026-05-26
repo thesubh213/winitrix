@@ -33,7 +33,14 @@ jobs:
         version: latest
 
     - name: Run Tests
-      run: go test -mod=readonly -v -race ./...
+      shell: pwsh
+      run: |
+        $goArch = (go env GOARCH).Trim()
+        if ($goArch -eq 'amd64') {
+          go test -mod=readonly -v -race ./...
+        } else {
+          go test -mod=readonly -v ./...
+        }
 
   build-windows:
     name: Build Windows Binary
