@@ -2,6 +2,7 @@ package ecosystem
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/thesubh213/winitrix/pkg/runner"
@@ -34,6 +35,8 @@ func (m *YarnManager) UpdateAll(ctx context.Context) Result {
 		}
 	}
 
+	beforeVersions, _ := snapshotYarnGlobalVersions(ctx)
+
 	// It's Yarn 1.x
 	res := runner.RunSilent(ctx, "yarn", "global", "upgrade")
 
@@ -45,10 +48,21 @@ func (m *YarnManager) UpdateAll(ctx context.Context) Result {
 		}
 	}
 
+	afterVersions, ok := snapshotYarnGlobalVersions(ctx)
+	updated := 0
+	if ok {
+		updated = countVersionChanges(beforeVersions, afterVersions)
+	}
+
+	message := "Yarn global upgrade completed."
+	if updated > 0 {
+		message = fmt.Sprintf("Successfully updated %d global Yarn packages", updated)
+	}
+
 	return Result{
 		Success: true,
-		Message: "Successfully updated global Yarn packages",
-		Updated: 1, // Placeholder
+		Message: message,
+		Updated: updated,
 	}
 }
 

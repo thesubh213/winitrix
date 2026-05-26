@@ -36,3 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Integrated UAC elevation detection utilizing `ShellExecute` to automatically elevate the application safely when modifying global package managers.
+
+## [1.0.1] - 2026-05-26
+
+### Added
+- **Configuration Viewer**: Added `winitrix config show` to print the merged runtime settings, with JSON output for automation.
+
+### Changed
+- **Windows Launcher**: The Start Menu and desktop shortcuts now open Winitrix through a terminal wrapper so double-clicking from Windows launches a real console session.
+- **Documentation**: Clarified how to launch Winitrix from Windows shortcuts and updated the release guide for patch releases.
+
+### Fixed
+- **Accurate Update Counts**: Yarn and pipx now report real package update counts instead of placeholder values.

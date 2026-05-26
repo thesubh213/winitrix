@@ -17,14 +17,14 @@ Winitrix uses Semantic Versioning (`vMAJOR.MINOR.PATCH`).
 You **must** use annotated tags so the GitHub Actions pipeline captures the release metadata correctly.
 
 ```bash
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
 ## 3. Verify the CI/CD Pipeline
 Once the tag is pushed to GitHub:
 1. Navigate to the **Actions** tab in the GitHub repository.
-2. You will see the `Release` workflow triggered by the `v1.0.0` tag.
+2. You will see the `Release` workflow triggered by the `vX.Y.Z` tag.
 3. The workflow will automatically:
    - Build a stripped executable (`winitrix.exe`) with `ldflags` injected.
    - Build a Windows installer (`winitrix-setup-vX.X.X.exe`) using Inno Setup.
@@ -40,7 +40,7 @@ Once the tag is pushed to GitHub:
 
 ## Rollback Guidance
 If a critical error is found immediately after tagging:
-1. Delete the remote tag: `git push --delete origin v1.0.0`
-2. Delete the local tag: `git tag -d v1.0.0`
+1. Delete the remote tag: `git push --delete origin vX.Y.Z`
+2. Delete the local tag: `git tag -d vX.Y.Z`
 3. Delete the drafted GitHub Release from the repository.
 4. Fix the code, merge, and re-tag using a new patch version (e.g., `v1.0.1`).

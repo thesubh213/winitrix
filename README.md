@@ -49,11 +49,15 @@ Winitrix automatically detects and orchestrates:
 3. Run the installer (per-user, no admin required). It adds Winitrix to PATH and creates an uninstall entry.
 4. Open a new terminal and run `winitrix`.
 
+The Start Menu and desktop shortcuts installed by Winitrix launch through a terminal wrapper, so double-clicking them opens the CLI in a normal console window instead of exposing the raw executable.
+
 ### Method 2: Portable EXE
 1. Go to the [Releases](https://github.com/thesubh213/winitrix/releases) page.
 2. Download `winitrix.exe` or `winitrix-vX.X.X-windows-amd64.zip`.
 3. If you download the ZIP, extract `winitrix.exe`. Double-click it once. Winitrix will copy itself to `%LOCALAPPDATA%\Winitrix\bin` and add that folder to your user `PATH`.
 4. Open a new terminal and run `winitrix`.
+
+If you prefer double-click launching from Windows, install the setup EXE first and use the Start Menu entry.
 
 #### Verify Checksum
 We provide SHA256 checksums to ensure supply-chain integrity:
@@ -99,6 +103,7 @@ Winitrix will scan your system, detect installed managers, and begin the update 
 | `winitrix logs --bundle` | Create a diagnostic bundle (logs, config, state) |
 | `winitrix install` | Install Winitrix to PATH (Windows user profile) |
 | `winitrix config` | Manage the Winitrix config file |
+| `winitrix config show` | Display the active configuration and merged settings |
 | `winitrix schedule` | Print or apply a Task Scheduler entry |
 | `winitrix --version` | Display build metadata and version info |
 
@@ -129,6 +134,13 @@ Create a starter config file:
 ```bash
 winitrix config init
 ```
+
+Inspect the active configuration that Winitrix will use:
+```bash
+winitrix config show
+```
+
+Add `--json` to emit the same data as structured output for scripts.
 
 Default config location:
 - `%APPDATA%\Winitrix\config.toml`

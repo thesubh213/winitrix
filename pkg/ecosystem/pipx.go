@@ -2,6 +2,7 @@ package ecosystem
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/thesubh213/winitrix/pkg/runner"
 	"github.com/thesubh213/winitrix/pkg/translator"
@@ -23,6 +24,8 @@ func (m *PipxManager) Detect(ctx context.Context) bool {
 }
 
 func (m *PipxManager) UpdateAll(ctx context.Context) Result {
+	beforeVersions, _ := snapshotPipxVersions(ctx)
+
 	res := runner.RunSilent(ctx, "pipx", "upgrade-all")
 
 	if res.Err != nil {
@@ -33,10 +36,21 @@ func (m *PipxManager) UpdateAll(ctx context.Context) Result {
 		}
 	}
 
+	afterVersions, ok := snapshotPipxVersions(ctx)
+	updated := 0
+	if ok {
+		updated = countVersionChanges(beforeVersions, afterVersions)
+	}
+
+	message := "pipx upgrade-all completed."
+	if updated > 0 {
+		message = fmt.Sprintf("Successfully upgraded %d pipx applications", updated)
+	}
+
 	return Result{
 		Success: true,
-		Message: "Successfully upgraded pipx applications",
-		Updated: 1, // Placeholder
+		Message: message,
+		Updated: updated,
 	}
 }
 

@@ -30,12 +30,13 @@ Name: "addtopath"; Description: "Add Winitrix to &PATH"; Flags: checkedonce
 
 [Files]
 Source: "..\dist\winitrix.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "..\installer\winitrix-launch.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\Winitrix"; Filename: "{app}\{#MyAppExeName}"
-Name: "{userdesktop}\Winitrix"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userprograms}\Winitrix"; Filename: "{app}\winitrix-launch.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{userdesktop}\Winitrix"; Filename: "{app}\winitrix-launch.cmd"; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\{#MyAppExeName}"
 
 [Code]
 function NormalizePath(Value: string): string;

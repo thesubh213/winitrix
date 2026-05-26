@@ -18,16 +18,18 @@ jobs:
         fetch-depth: 0
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.21'
         cache: true
+        cache-dependency-path: go.sum
 
     - name: Validate
       shell: bash
       run: |
+        go mod tidy -diff
         go vet ./...
-        go test -race ./...
+        go test -mod=readonly -race ./...
 
     - name: Get Version info
       id: vars
@@ -46,7 +48,7 @@ jobs:
         -X 'github.com/thesubh213/winitrix/cmd.commit=${{ steps.vars.outputs.commit }}' \
         -X 'github.com/thesubh213/winitrix/cmd.date=${{ steps.vars.outputs.date }}' \
         -X 'github.com/thesubh213/winitrix/cmd.goVersion=$(go version | cut -d' ' -f3)'" \
-        -o dist/winitrix.exe ./main.go
+        -o dist/winitrix.exe .
 
     - name: Install Inno Setup
       shell: pwsh
