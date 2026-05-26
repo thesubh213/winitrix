@@ -44,3 +44,4 @@ If a critical error is found immediately after tagging:
 2. Delete the local tag: `git tag -d vX.Y.Z`
 3. Delete the drafted GitHub Release from the repository.
 4. Fix the code, merge, and re-tag using a new patch version (e.g., `v1.0.1`).
+5. BYE
