@@ -78,16 +78,36 @@ func (m *WslManager) Clean(ctx context.Context) Result {
 }
 
 func (m *WslManager) Doctor(ctx context.Context) Result {
-	res := runner.RunSilent(ctx, "wsl", "-e", "apt-get", "check")
+	// Check if sudo is available and doesn't require a password
+	res := runner.RunSilent(ctx, "wsl", "-e", "sudo", "-n", "apt-get", "check")
 	if res.Err != nil {
+		combined := strings.ToLower(res.Stdout + "\n" + res.Stderr)
+		if strings.Contains(combined, "password is required") || strings.Contains(combined, "passwordless") || strings.Contains(combined, "sudo") {
+			return Result{
+				Success: false,
+				Message: "WSL apt check failed. Winitrix requires passwordless sudo setup for WSL apt-get command.",
+				Error:   res.Err,
+			}
+		}
+
+		// Otherwise fallback to trying without sudo to see if default user is root (e.g. Docker/WSL custom configs)
+		resNoSudo := runner.RunSilent(ctx, "wsl", "-e", "apt-get", "check")
+		if resNoSudo.Err == nil {
+			return Result{
+				Success: true,
+				Message: "WSL subsystem is healthy (running as root default user).",
+			}
+		}
+
 		return Result{
 			Success: false,
-			Message: "WSL apt check failed.",
+			Message: "WSL apt check failed. Ensure apt-get is working and sudo is passwordless.",
 			Error:   res.Err,
 		}
 	}
+
 	return Result{
 		Success: true,
-		Message: "WSL subsystem is healthy.",
+		Message: "WSL subsystem is healthy and passwordless sudo is configured.",
 	}
 }

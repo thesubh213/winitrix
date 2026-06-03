@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Integrated UAC elevation detection utilizing `ShellExecute` to automatically elevate the application safely when modifying global package managers.
 
+## [1.0.2] - 2026-06-03
+
+### Added
+- **Config Edit Subcommand**: Added `winitrix config edit` to open the active Winitrix config file in the default system text editor (or notepad).
+- **Execution Report CLI**: Added a styled `winitrix report` command using Lipgloss to view detailed outcomes of the last update run.
+
+### Changed
+- **WSL Passwordless Sudo Diagnostic**: Enhanced `winitrix doctor` to verify passwordless `sudo` capability for WSL apt-get commands.
+
 ## [1.0.1] - 2026-05-26
 
 ### Added

@@ -123,6 +123,28 @@ func SaveReport(path string, rep RunReport) (string, error) {
 	return path, os.WriteFile(path, data, 0644)
 }
 
+// LoadReport reads and decodes a run report from the given path.
+func LoadReport(path string) (RunReport, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return RunReport{}, err
+	}
+	var rep RunReport
+	if err := json.Unmarshal(data, &rep); err != nil {
+		return RunReport{}, err
+	}
+	return rep, nil
+}
+
+// LoadLastReport reads the report from the default cache path.
+func LoadLastReport() (RunReport, error) {
+	path, err := paths.DefaultReportPath()
+	if err != nil {
+		return RunReport{}, err
+	}
+	return LoadReport(path)
+}
+
 // WriteReport writes the JSON report to stdout.
 func WriteReport(rep RunReport) error {
 	data, err := json.MarshalIndent(rep, "", "  ")
