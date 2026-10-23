@@ -21,7 +21,7 @@ Most developers have Winget, Scoop, NPM, Pip, Cargo, Docker, and WSL scattered a
 
 Winitrix abstracts this away:
 
-- **Beautiful TUI** — Smooth animated interface inspired by modern terminal dashboards (lazygit, btop)
+- **Beautiful TUI** — Animated gradient dashboard inspired by modern terminal UIs (lazygit, btop): live progress bars, per-ecosystem status, and a full-screen alternate buffer. Settings for animations, ASCII glyphs, and `NO_COLOR` are respected.
 - **Intelligent Error Translation** — Replaces raw errors like `0x80072efd` or `EACCES` with human-readable advice
 - **UAC Elevation** — Requests administrator privileges seamlessly when needed
 - **Zero Telemetry** — Strictly offline-first. No tracking, no cloud dependencies.
@@ -67,7 +67,7 @@ Get-FileHash winitrix.exe -Algorithm SHA256
 Compare the output against the `checksums.txt` file attached to the release.
 
 ### Method 3: Compile from Source
-Ensure you have Go 1.21+ installed:
+Ensure you have Go 1.26+ installed (older toolchains can auto-download it via `GOTOOLCHAIN`):
 ```bash
 git clone https://github.com/thesubh213/winitrix.git
 cd winitrix
@@ -127,6 +127,20 @@ Winitrix will scan your system, detect installed managers, and begin the update 
 | `--select` | Select managers interactively before updating |
 | `--notify` | Show a desktop notification on completion |
 | `--notify-on-failure` | Only notify when failures occur |
+| `--demo` | (hidden) Run the UI against simulated package managers — useful for previewing the interface |
+
+### Keyboard (TUI)
+| Key | Action |
+| :--- | :--- |
+| `↑`/`↓`, `k`/`j` | Move the selection cursor |
+| `space` | Toggle the selected ecosystem |
+| `a` / `n` | Select all / none |
+| `enter` | Start updating |
+| `r` / `s` / `q` | Retry / skip / quit after a failure |
+| `d` | Expand / collapse the live output pane for the running ecosystem |
+| `esc` | Close the output pane (or open the cancel prompt when it's closed) |
+| `ctrl+c` (or `q`) | Cancel the running update (asks for confirmation) |
+| `enter` | Exit the summary screen |
 
 ## Configuration
 
@@ -149,6 +163,8 @@ Config highlights:
 - Profiles for different manager sets
 - Default timeouts, retries, and filters
 - Optional TUI selection and notifications
+
+UI settings (`[ui]`): `select_managers`, `animations` (animated gradient header, spinners, progress bars), `alt_screen` (full-screen alternate buffer), and `ascii` (ASCII glyphs for legacy consoles). `NO_COLOR` disables colors while keeping the layout.
 
 ## Scheduling
 
@@ -196,9 +212,13 @@ winitrix/
 │   │   ├── winget.go       # Winget adapter
 │   │   ├── scoop.go        # Scoop adapter
 │   │   └── ...             # 19 more adapters
-│   ├── tui/                # Bubble Tea state machine
-│   │   ├── model.go        # TUI model + rendering
-│   │   └── style.go        # Lipgloss color palette
+│   ├── tui/                # Bubble Tea v2 state machine + animation engine
+│   │   ├── model.go        # TUI state machine and update loop
+│   │   ├── view.go         # Screen rendering (panels, bars, layout)
+│   │   ├── anim.go         # Animation engine (gradient frames, spinner, bars)
+│   │   ├── theme.go        # Palette, styles, glyph sets
+│   │   ├── layout.go       # Width-aware layout helpers
+│   │   └── progress.go     # Throttled progress relay
 │   ├── translator/         # Error translation engine
 │   ├── runner/             # Silent command executor
 │   ├── elevation/          # UAC privilege handling

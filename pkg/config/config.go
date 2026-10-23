@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/thesubh213/winitrix/pkg/paths"
@@ -45,6 +46,9 @@ type Profile struct {
 // UIConfig configures the TUI behavior.
 type UIConfig struct {
 	SelectManagers *bool `toml:"select_managers,omitempty"`
+	Animations     *bool `toml:"animations,omitempty"`
+	AltScreen      *bool `toml:"alt_screen,omitempty"`
+	ASCII          *bool `toml:"ascii,omitempty"`
 }
 
 // NotificationConfig controls desktop notifications.
@@ -68,6 +72,9 @@ type EffectiveSettings struct {
 	JSON                 bool
 	Verbose              bool
 	SelectManagers       bool
+	Animations           bool
+	AltScreen            bool
+	ASCII                bool
 	NotificationsEnabled bool
 	NotifyOnlyOnFailure  bool
 	Profile              string
@@ -122,6 +129,9 @@ func Effective(cfg Config, profileName string) EffectiveSettings {
 		RetryBackoff:         false,
 		MaxRetryDelaySeconds: 30,
 		SelectManagers:       false,
+		Animations:           true,
+		AltScreen:            true,
+		ASCII:                false,
 		NotificationsEnabled: false,
 		NotifyOnlyOnFailure:  true,
 		Profile:              profileName,
@@ -137,6 +147,18 @@ func Effective(cfg Config, profileName string) EffectiveSettings {
 
 	if cfg.UI.SelectManagers != nil {
 		settings.SelectManagers = *cfg.UI.SelectManagers
+	}
+	if cfg.UI.Animations != nil {
+		settings.Animations = *cfg.UI.Animations
+	}
+	if cfg.UI.AltScreen != nil {
+		settings.AltScreen = *cfg.UI.AltScreen
+	}
+	if cfg.UI.ASCII != nil {
+		settings.ASCII = *cfg.UI.ASCII
+	}
+	if v := os.Getenv("WINITRIX_ASCII"); v == "1" || strings.EqualFold(v, "true") {
+		settings.ASCII = true
 	}
 	if cfg.Notifications.Enabled != nil {
 		settings.NotificationsEnabled = *cfg.Notifications.Enabled
@@ -209,7 +231,7 @@ func WriteDefaultConfig(path string, force bool) (string, error) {
 	}
 
 	content := defaultConfigTemplate()
-	return resolved, os.WriteFile(resolved, []byte(content), 0644)
+	return resolved, paths.WriteFileAtomic(resolved, []byte(content), 0644)
 }
 
 func defaultConfigTemplate() string {
@@ -234,6 +256,9 @@ version = 1
 
 [ui]
 # select_managers = false
+# animations = true      # animated gradient header, spinners, progress bars
+# alt_screen = true      # run the TUI in the full-screen alternate buffer
+# ascii = false          # use ASCII glyphs instead of unicode (legacy consoles)
 
 [notifications]
 # enabled = false

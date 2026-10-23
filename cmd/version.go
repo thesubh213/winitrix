@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"io"
 	"runtime"
 
@@ -22,17 +21,17 @@ func init() {
 }
 
 func printVersionInfo(out io.Writer) {
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, tui.Brand())
-	fmt.Fprintln(out, tui.SubtleStyle.Render("  Unified Windows Package Orchestration Engine"))
-	fmt.Fprintln(out, tui.Divider())
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "  %s  %s\n", tui.DimBoldStyle.Render("Version"), tui.HighlightStyle.Render(version))
-	fmt.Fprintf(out, "  %s   %s\n", tui.DimBoldStyle.Render("Commit"), tui.AccentStyle.Render(commit))
-	fmt.Fprintf(out, "  %s    %s\n", tui.DimBoldStyle.Render("Built"), tui.SubtleStyle.Render(date))
-	fmt.Fprintf(out, "  %s       %s\n", tui.DimBoldStyle.Render("Go"), tui.SubtleStyle.Render(goVersion))
-	fmt.Fprintf(out, "  %s       %s\n", tui.DimBoldStyle.Render("OS"), tui.SubtleStyle.Render(runtime.GOOS+"/"+runtime.GOARCH))
-	fmt.Fprintln(out)
+	tui.Fprintln(out)
+	tui.Fprintln(out, tui.Brand())
+	tui.Fprintln(out, tui.SubtleStyle.Render("  Unified Windows Package Orchestration Engine"))
+	tui.Fprintln(out, tui.Divider())
+	tui.Fprintln(out)
+	tui.Fprintf(out, "  %s  %s\n", tui.DimBoldStyle.Render("Version"), tui.HighlightStyle.Render(version))
+	tui.Fprintf(out, "  %s   %s\n", tui.DimBoldStyle.Render("Commit"), tui.AccentStyle.Render(commit))
+	tui.Fprintf(out, "  %s    %s\n", tui.DimBoldStyle.Render("Built"), tui.SubtleStyle.Render(date))
+	tui.Fprintf(out, "  %s       %s\n", tui.DimBoldStyle.Render("Go"), tui.SubtleStyle.Render(goVersion))
+	tui.Fprintf(out, "  %s       %s\n", tui.DimBoldStyle.Render("OS"), tui.SubtleStyle.Render(runtime.GOOS+"/"+runtime.GOARCH))
+	tui.Fprintln(out)
 }
 
 func buildInfo() report.BuildInfo {

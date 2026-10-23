@@ -2,9 +2,11 @@ package ecosystem
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/thesubh213/winitrix/pkg/elevation"
+	"github.com/thesubh213/winitrix/pkg/logger"
 	"github.com/thesubh213/winitrix/pkg/runner"
 	"github.com/thesubh213/winitrix/pkg/translator"
 )
@@ -21,15 +23,14 @@ func (m *ScoopManager) Name() string {
 
 func (m *ScoopManager) Detect(ctx context.Context) bool {
 	res := runner.RunSilent(ctx, "powershell", "-Command", "scoop --version")
-	if res.Err == nil && strings.Contains(res.Stdout, "Scoop") {
-		return true
-	}
-	return false
+	return res.Err == nil && strings.TrimSpace(res.Stdout) != ""
 }
 
 func (m *ScoopManager) UpdateAll(ctx context.Context) Result {
-	// First update scoop itself
-	runner.RunSilent(ctx, "powershell", "-Command", "scoop update")
+	// First update scoop itself (non-fatal if it fails)
+	if self := runner.RunSilent(ctx, "powershell", "-Command", "scoop update"); self.Err != nil {
+		logger.Info("Scoop self-update failed, continuing with package updates: %v", self.Err)
+	}
 
 	// Then update packages
 	res := runner.RunSilent(ctx, "powershell", "-Command", "scoop update *")
@@ -62,8 +63,10 @@ func (m *ScoopManager) UpdateAll(ctx context.Context) Result {
 }
 
 func (m *ScoopManager) UpdateAllWithProgress(ctx context.Context, progressCb runner.ProgressCallback) Result {
-	// Update scoop itself first
-	runner.RunSilent(ctx, "powershell", "-Command", "scoop update")
+	// Update scoop itself first (non-fatal if it fails)
+	if self := runner.RunSilent(ctx, "powershell", "-Command", "scoop update"); self.Err != nil {
+		logger.Info("Scoop self-update failed, continuing with package updates: %v", self.Err)
+	}
 
 	streamRes := runner.RunWithProgress(ctx, progressCb, "powershell", "-Command", "scoop update *")
 
@@ -104,7 +107,13 @@ func (m *ScoopManager) Clean(ctx context.Context) Result {
 		}
 	}
 
-	runner.RunSilent(ctx, "powershell", "-Command", "scoop cache rm *")
+	if rm := runner.RunSilent(ctx, "powershell", "-Command", "scoop cache rm *"); rm.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Scoop apps cleaned, but clearing the download cache failed.",
+			Error:   rm.Err,
+		}
+	}
 
 	return Result{
 		Success: true,
@@ -114,11 +123,16 @@ func (m *ScoopManager) Clean(ctx context.Context) Result {
 
 func (m *ScoopManager) Doctor(ctx context.Context) Result {
 	res := runner.RunSilent(ctx, "powershell", "-Command", "scoop checkup")
-	if strings.Contains(res.Stdout, "ERROR") {
+	output := strings.ToLower(res.Stdout + res.Stderr)
+	if res.Err != nil || strings.Contains(output, "error") {
+		err := res.Err
+		if err == nil {
+			err = errors.New("scoop checkup reported errors")
+		}
 		return Result{
 			Success: false,
 			Message: "Scoop checkup found issues.",
-			Error:   res.Err,
+			Error:   err,
 		}
 	}
 	return Result{

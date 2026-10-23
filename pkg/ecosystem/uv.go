@@ -46,7 +46,14 @@ func (m *UvManager) UpdateAllWithProgress(ctx context.Context, progressCb runner
 }
 
 func (m *UvManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "uv", "cache", "clean")
+	res := runner.RunSilent(ctx, "uv", "cache", "clean")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clean uv cache.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "uv cache cleaned.",

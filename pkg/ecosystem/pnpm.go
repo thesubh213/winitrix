@@ -54,7 +54,14 @@ func (m *PnpmManager) UpdateAllWithProgress(ctx context.Context, progressCb runn
 }
 
 func (m *PnpmManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "pnpm", "store", "prune")
+	res := runner.RunSilent(ctx, "pnpm", "store", "prune")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to prune pnpm store.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "pnpm store pruned.",

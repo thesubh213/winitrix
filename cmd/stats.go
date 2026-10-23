@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -17,17 +16,18 @@ var statsCmd = &cobra.Command{
 		logger.Init()
 		defer logger.Close()
 
-		ctx := context.Background()
+		ctx, stop := interruptContext()
+		defer stop()
 
-		fmt.Println()
-		fmt.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  statistics"))
-		fmt.Println(tui.Divider())
-		fmt.Println()
+		tui.Println()
+		tui.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  statistics"))
+		tui.Println(tui.Divider())
+		tui.Println()
 
 		all := ecosystem.GetAllManagers()
 		managers := ecosystem.GetDetectedManagers(ctx)
 
-		fmt.Printf("  %s  %s / %s ecosystems detected\n\n",
+		tui.Printf("  %s  %s / %s ecosystems detected\n\n",
 			tui.HighlightStyle.Render(fmt.Sprintf("%d", len(managers))),
 			tui.SuccessStyle.Render("active"),
 			tui.SubtleStyle.Render(fmt.Sprintf("%d supported", len(all))))
@@ -62,17 +62,17 @@ var statsCmd = &cobra.Command{
 				continue
 			}
 
-			fmt.Printf("  %s\n", tui.DimBoldStyle.Render(cat.name))
+			tui.Printf("  %s\n", tui.DimBoldStyle.Render(cat.name))
 			for _, name := range cat.managers {
 				if detectedNames[name] {
-					fmt.Printf("%s %s\n", tui.Checkmark(), name)
+					tui.Printf("%s %s\n", tui.Checkmark(), name)
 				}
 			}
-			fmt.Println()
+			tui.Println()
 		}
 
-		fmt.Println(tui.Divider())
-		fmt.Println()
+		tui.Println(tui.Divider())
+		tui.Println()
 	},
 }
 

@@ -120,7 +120,7 @@ func SaveReport(path string, rep RunReport) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, data, 0644)
+	return path, paths.WriteFileAtomic(path, data, 0644)
 }
 
 // LoadReport reads and decodes a run report from the given path.

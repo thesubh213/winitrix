@@ -46,7 +46,14 @@ func (m *PoetryManager) UpdateAllWithProgress(ctx context.Context, progressCb ru
 }
 
 func (m *PoetryManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "poetry", "cache", "clear", "pypi", "--all", "-n")
+	res := runner.RunSilent(ctx, "poetry", "cache", "clear", "pypi", "--all", "-n")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clear Poetry cache.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "Poetry cache cleared.",

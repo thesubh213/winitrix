@@ -1,6 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Keep Go sources LF so gofmt/goimports runs don't churn line endings on Windows
+*.go text eol=lf
+
 # Keep Go module files LF to avoid CI go mod tidy diffs on Windows
 go.mod text eol=lf
 go.sum text eol=lf

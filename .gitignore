@@ -29,3 +29,6 @@ winitrix.exe
 # Accidentally downloaded toolchains
 go/
 go.zip
+
+# Local AI assistant data (taste, plans, session state)
+.commandcode/

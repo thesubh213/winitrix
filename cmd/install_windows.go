@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,37 +28,37 @@ var installCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		exePath, err := os.Executable()
 		if err != nil {
-			fmt.Printf("Failed to determine executable path: %v\n", err)
+			tui.Printf("Failed to determine executable path: %v\n", err)
 			return
 		}
 
 		exePath, err = filepath.Abs(exePath)
 		if err != nil {
-			fmt.Printf("Failed to resolve executable path: %v\n", err)
+			tui.Printf("Failed to resolve executable path: %v\n", err)
 			return
 		}
 
 		destDir, destPath, err := resolveInstallPath(installPath)
 		if err != nil {
-			fmt.Printf("Failed to resolve install path: %v\n", err)
+			tui.Printf("Failed to resolve install path: %v\n", err)
 			return
 		}
 
 		if err := os.MkdirAll(destDir, 0755); err != nil {
-			fmt.Printf("Failed to create install directory: %v\n", err)
+			tui.Printf("Failed to create install directory: %v\n", err)
 			return
 		}
 
 		if !strings.EqualFold(exePath, destPath) {
 			if err := copyExecutable(exePath, destPath, installForce); err != nil {
-				fmt.Printf("Failed to install Winitrix: %v\n", err)
+				tui.Printf("Failed to install Winitrix: %v\n", err)
 				return
 			}
 		}
 
 		updated, err := ensurePathContains(destDir)
 		if err != nil {
-			fmt.Printf("Failed to update PATH: %v\n", err)
+			tui.Printf("Failed to update PATH: %v\n", err)
 			return
 		}
 
@@ -65,19 +66,19 @@ var installCmd = &cobra.Command{
 			broadcastEnvironmentChange()
 		}
 
-		fmt.Println()
-		fmt.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  installed"))
-		fmt.Println(tui.Divider())
-		fmt.Println()
-		fmt.Printf("  %s %s\n", tui.Checkmark(), tui.BoldStyle.Render("Winitrix installed"))
-		fmt.Printf("  %s %s\n", tui.Checkmark(), tui.SubtleStyle.Render("Path: "+destPath))
+		tui.Println()
+		tui.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  installed"))
+		tui.Println(tui.Divider())
+		tui.Println()
+		tui.Printf("  %s %s\n", tui.Checkmark(), tui.BoldStyle.Render("Winitrix installed"))
+		tui.Printf("  %s %s\n", tui.Checkmark(), tui.SubtleStyle.Render("Path: "+destPath))
 		if updated {
-			fmt.Printf("  %s %s\n", tui.Checkmark(), tui.SubtleStyle.Render("PATH updated (new terminals will pick this up)"))
+			tui.Printf("  %s %s\n", tui.Checkmark(), tui.SubtleStyle.Render("PATH updated (new terminals will pick this up)"))
 		} else {
-			fmt.Printf("  %s %s\n", tui.Checkmark(), tui.SubtleStyle.Render("PATH already contains install directory"))
+			tui.Printf("  %s %s\n", tui.Checkmark(), tui.SubtleStyle.Render("PATH already contains install directory"))
 		}
-		fmt.Println()
-		fmt.Println(tui.SubtleStyle.Render("Try: winitrix --help"))
+		tui.Println()
+		tui.Println(tui.SubtleStyle.Render("Try: winitrix --help"))
 	},
 }
 
@@ -107,11 +108,13 @@ func tryAutoInstall() error {
 		return err
 	}
 
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-
+	// Fast path: already running from the install location, so only the PATH
+	// entry needs to be verified. Avoids a stat/copy attempt on every run.
 	if !strings.EqualFold(exePath, destPath) {
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return err
+		}
+
 		if _, err := os.Stat(destPath); err != nil {
 			if !os.IsNotExist(err) {
 				return err
@@ -178,13 +181,13 @@ func copyExecutable(src, dst string, force bool) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return err
@@ -193,14 +196,28 @@ func copyExecutable(src, dst string, force bool) error {
 	return dstFile.Sync()
 }
 
+// ensurePathContains adds dir to the user's PATH when missing. It reads the
+// registry value with its type so that REG_EXPAND_SZ entries (which commonly
+// contain %USERPROFILE%) keep their type, and it aborts on a read error rather
+// than treating the failure as an empty PATH — which previously risked
+// overwriting the user's entire PATH with a single entry.
 func ensurePathContains(dir string) (bool, error) {
 	key, err := registry.OpenKey(registry.CURRENT_USER, "Environment", registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return false, err
 	}
-	defer key.Close()
+	defer func() { _ = key.Close() }()
 
-	existing, _, _ := key.GetStringValue("Path")
+	return ensurePathInKey(key, dir)
+}
+
+// ensurePathInKey implements the PATH append against an already-open key.
+func ensurePathInKey(key registry.Key, dir string) (bool, error) {
+	existing, valueType, err := key.GetStringValue("Path")
+	if err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return false, fmt.Errorf("refusing to modify PATH after registry read error: %w", err)
+	}
+
 	if pathContains(existing, dir) {
 		return false, nil
 	}
@@ -211,8 +228,14 @@ func ensurePathContains(dir string) (bool, error) {
 	}
 	newPath += dir
 
-	if err := key.SetStringValue("Path", newPath); err != nil {
-		return false, err
+	if valueType == registry.EXPAND_SZ {
+		if err := key.SetExpandStringValue("Path", newPath); err != nil {
+			return false, err
+		}
+	} else {
+		if err := key.SetStringValue("Path", newPath); err != nil {
+			return false, err
+		}
 	}
 
 	return true, nil

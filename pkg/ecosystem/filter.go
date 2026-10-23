@@ -2,7 +2,10 @@ package ecosystem
 
 import "strings"
 
-var managerAliases = map[string][]string{
+// managerAliasTokens maps a user-facing token to normalized manager names it
+// should select even though the names don't share a prefix. Exact matching is
+// preferred over substring matching so `--only pip` never selects pipx.
+var managerAliasTokens = map[string][]string{
 	"dotnet": {"nettools"},
 	"vscode": {"vscodeextensions"},
 	"wsl":    {"wslapt"},
@@ -15,13 +18,15 @@ func FilterManagers(managers []PackageManager, only []string, exclude []string) 
 		return managers
 	}
 
+	onlyMatchers := buildMatchers(managers, only)
+	excludeMatchers := buildMatchers(managers, exclude)
+
 	var filtered []PackageManager
 	for _, mgr := range managers {
-		name := mgr.Name()
-		if len(only) > 0 && !matchesAnyToken(name, only) {
+		if len(onlyMatchers) > 0 && !matchesAny(onlyMatchers, mgr.Name()) {
 			continue
 		}
-		if len(exclude) > 0 && matchesAnyToken(name, exclude) {
+		if len(excludeMatchers) > 0 && matchesAny(excludeMatchers, mgr.Name()) {
 			continue
 		}
 		filtered = append(filtered, mgr)
@@ -30,34 +35,61 @@ func FilterManagers(managers []PackageManager, only []string, exclude []string) 
 	return filtered
 }
 
-func matchesAnyToken(managerName string, tokens []string) bool {
+// tokenMatcher matches normalized manager names. When a token resolves to at
+// least one manager by exact name (or alias), only those managers match;
+// otherwise the token falls back to substring matching for convenience.
+type tokenMatcher struct {
+	exactNames map[string]bool
+	substring  string
+}
+
+func buildMatchers(managers []PackageManager, tokens []string) []tokenMatcher {
+	matchers := make([]tokenMatcher, 0, len(tokens))
 	for _, token := range tokens {
-		if managerMatchesToken(managerName, token) {
+		norm := normalizeToken(token)
+		if norm == "" {
+			continue
+		}
+
+		exact := make(map[string]bool)
+		for _, mgr := range managers {
+			name := normalizeToken(mgr.Name())
+			if name == norm || aliasMatches(norm, name) {
+				exact[name] = true
+			}
+		}
+
+		if len(exact) > 0 {
+			matchers = append(matchers, tokenMatcher{exactNames: exact})
+		} else {
+			matchers = append(matchers, tokenMatcher{substring: norm})
+		}
+	}
+	return matchers
+}
+
+func aliasMatches(tokenNorm, managerNorm string) bool {
+	for _, alias := range managerAliasTokens[tokenNorm] {
+		if alias == managerNorm {
 			return true
 		}
 	}
 	return false
 }
 
-func managerMatchesToken(managerName, token string) bool {
-	nameNorm := normalizeToken(managerName)
-	tokenNorm := normalizeToken(token)
-	if tokenNorm == "" {
-		return false
-	}
-
-	if strings.Contains(nameNorm, tokenNorm) {
-		return true
-	}
-
-	if aliases, ok := managerAliases[tokenNorm]; ok {
-		for _, alias := range aliases {
-			if strings.Contains(nameNorm, alias) {
+func matchesAny(matchers []tokenMatcher, managerName string) bool {
+	name := normalizeToken(managerName)
+	for _, m := range matchers {
+		if m.exactNames != nil {
+			if m.exactNames[name] {
 				return true
 			}
+			continue
+		}
+		if m.substring != "" && strings.Contains(name, m.substring) {
+			return true
 		}
 	}
-
 	return false
 }
 

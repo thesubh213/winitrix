@@ -2,13 +2,13 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"image/color"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 	"github.com/thesubh213/winitrix/pkg/ecosystem"
 	"github.com/thesubh213/winitrix/pkg/logger"
 	"github.com/thesubh213/winitrix/pkg/retry"
@@ -33,7 +33,7 @@ type UpdateMsg struct {
 	Duration    time.Duration
 }
 
-// ProgressMsg contains progress information during package updates
+// ProgressMsg contains progress information during package updates.
 type ProgressMsg struct {
 	ManagerName string
 	PackageName string
@@ -55,100 +55,283 @@ type Options struct {
 	SelectManagers    bool
 	PreviousDurations map[string]time.Duration
 	ProgressRelay     *ProgressRelay
+
+	// Managers, when non-empty, skips ecosystem detection entirely and
+	// updates the provided managers (used by --demo and tests).
+	Managers []ecosystem.PackageManager
+
+	Animations bool
+	AltScreen  bool
+	ASCII      bool
+	Version    string
 }
 
 type scanDoneMsg struct {
 	managers []ecosystem.PackageManager
 }
 
+// Model is the Bubble Tea model for the winitrix dashboard.
 type Model struct {
-	spinner   spinner.Model
-	state     state
-	opts      Options
+	state state
+	opts  Options
+	ctx   context.Context
+
+	// cancelAll cancels the model's root context (scan + running manager).
+	cancelAll context.CancelFunc
+
+	width  int
+	height int
+
 	startTime time.Time
+	doneAt    time.Time
+	theme     theme
+	fx        *fx
 
 	detectedManagers  []ecosystem.PackageManager
 	results           []UpdateMsg
 	previousDurations map[string]time.Duration
+	expectedTotal     time.Duration
 
 	currentManagerIdx  int
 	currentPackageName string
 	currentProgress    int
 	currentStatus      string
 	currentStart       time.Time
-	ctx                context.Context
 	cancelCtx          context.CancelFunc
-	progressRelay      *ProgressRelay
 	pendingFailure     *UpdateMsg
-	selectIdx          int
-	selection          []bool
+	holdNext           bool
+	cancelled          bool
+	note               string
+
+	selectIdx int
+	selection []bool
+
+	// Details pane (live output of the running manager).
+	expanded   bool
+	logManager string
+	logLines   []string
+
+	scanProbed int
+	scanTotal  int
+	scanFound  []string
+
+	borderColors []color.Color
+	pulseStep    int
+
+	progressRelay *ProgressRelay
 }
 
+// NewModel creates the TUI model.
 func NewModel(ctx context.Context, opts Options) Model {
 	if opts.TimeoutMinutes <= 0 {
 		opts.TimeoutMinutes = 10
 	}
 
-	s := spinner.New()
-	s.Spinner = spinner.MiniDot
-	s.Style = lipgloss.NewStyle().Foreground(PrimaryColor)
+	t := newTheme(opts.ASCII)
+
+	runCtx, cancelRun := context.WithCancel(ctx)
 
 	return Model{
-		spinner:           s,
 		state:             stateScanning,
-		ctx:               ctx,
+		ctx:               runCtx,
+		cancelAll:         cancelRun,
 		opts:              opts,
+		theme:             t,
+		fx:                newFX(t, opts.Animations),
 		startTime:         time.Now(),
+		width:             80,
+		height:            24,
 		progressRelay:     opts.ProgressRelay,
 		previousDurations: opts.PreviousDurations,
 	}
 }
 
+// Init starts the animation loop and the initial scan (or injected managers).
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.spinner.Tick,
-		m.scanManagers,
-	)
+	if len(m.opts.Managers) > 0 {
+		managers := m.opts.Managers
+		return tea.Batch(tickCmd(m.animating()), func() tea.Msg {
+			return scanDoneMsg{managers: managers}
+		})
+	}
+	return tea.Batch(tickCmd(m.animating()), m.scanManagers)
+}
+
+func (m Model) animating() bool {
+	return m.opts.Animations && m.state != stateDone
 }
 
 func (m Model) scanManagers() tea.Msg {
 	logger.Info("Starting ecosystem scan")
-	time.Sleep(800 * time.Millisecond) // Brief pause for visual polish
-	managers := ecosystem.GetDetectedManagers(m.ctx)
-	managers = ecosystem.FilterManagers(managers, m.opts.Only, m.opts.Exclude)
+	var cb func(found string, probed, total int)
+	if m.progressRelay != nil {
+		cb = m.progressRelay.ScanCallback()
+	}
+	managers := ecosystem.DetectFiltered(m.ctx, m.opts.Only, m.opts.Exclude, cb)
 	logger.Info("Detected %d ecosystems", len(managers))
 	return scanDoneMsg{managers: managers}
 }
 
-func (m Model) runNextUpdate() tea.Cmd {
-	if m.currentManagerIdx >= len(m.detectedManagers) {
-		return func() tea.Msg {
-			return tea.Quit()
+// Update handles all messages.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = max(msg.Width, 20)
+		m.height = max(msg.Height, 8)
+		return m, nil
+
+	case animTickMsg:
+		m.fx.frame++
+		if m.pulseStep < len(m.borderColors) {
+			m.pulseStep++
 		}
+		if m.state == stateDone {
+			// The summary screen is static; stop the clock.
+			return m, nil
+		}
+		return m, tickCmd(m.animating())
+
+	case scanDoneMsg:
+		m.scanTotal = len(msg.managers)
+		m.scanProbed = m.scanTotal
+		m.detectedManagers = msg.managers
+		if len(m.detectedManagers) == 0 {
+			m.transition(stateDone)
+			return m, nil
+		}
+		m.selection = make([]bool, len(m.detectedManagers))
+		for i := range m.selection {
+			m.selection[i] = true
+		}
+		m.computeExpected()
+		if m.opts.SelectManagers {
+			m.transition(stateSelectManagers)
+			return m, nil
+		}
+		m.transition(stateUpdating)
+		return m.startNext()
+
+	case ScanProgressMsg:
+		m.scanProbed = msg.Probed
+		m.scanTotal = msg.Total
+		if msg.Found != "" {
+			m.scanFound = append(m.scanFound, msg.Found)
+		}
+		return m, nil
+
+	case ProgressMsg:
+		if m.currentManagerIdx < len(m.detectedManagers) {
+			currentName := m.detectedManagers[m.currentManagerIdx].Name()
+			if strings.EqualFold(currentName, msg.ManagerName) {
+				m.currentPackageName = msg.PackageName
+				m.currentProgress = msg.Percentage
+				m.currentStatus = msg.Status
+			}
+		}
+		return m, nil
+
+	case LogMsg:
+		// Ignore late snapshots from a manager that already finished.
+		if m.expanded && strings.EqualFold(msg.ManagerName, m.logManager) {
+			m.logLines = msg.Lines
+		}
+		return m, nil
+
+	case UpdateMsg:
+		return m.handleUpdateResult(msg)
+
+	case tea.KeyPressMsg:
+		return m.handleKey(msg)
+	}
+
+	return m, nil
+}
+
+func (m Model) handleUpdateResult(msg UpdateMsg) (tea.Model, tea.Cmd) {
+	m.currentPackageName = ""
+	m.currentProgress = 0
+	m.currentStatus = ""
+
+	if m.cancelled {
+		// The program is shutting down after a confirmed cancel; late results
+		// are dropped.
+		return m, nil
+	}
+
+	m.results = append(m.results, msg)
+	m.currentManagerIdx++
+
+	if !msg.Result.Success && !m.opts.NonStop {
+		failure := msg
+		m.pendingFailure = &failure
+		m.transition(stateErrorPrompt)
+		if m.expanded {
+			m.seedLog()
+		}
+		return m, nil
+	}
+
+	if m.currentManagerIdx >= len(m.detectedManagers) {
+		m.transition(stateDone)
+		return m, nil
+	}
+
+	if m.state == stateConfirmCancel {
+		// Hold the next manager until the user answers the cancel dialog.
+		m.holdNext = true
+		return m, nil
+	}
+
+	m.transition(stateUpdating)
+	return m.startNext()
+}
+
+func (m Model) startNext() (tea.Model, tea.Cmd) {
+	if m.currentManagerIdx >= len(m.detectedManagers) {
+		m.transition(stateDone)
+		return m, nil
 	}
 
 	manager := m.detectedManagers[m.currentManagerIdx]
-	return func() tea.Msg {
+	managerCtx, cancel := context.WithCancel(m.ctx)
+	m.cancelCtx = cancel
+	m.currentStart = time.Now()
+
+	// A fresh manager gets a fresh log buffer.
+	if m.progressRelay != nil {
+		m.progressRelay.ResetLog(manager.Name())
+	}
+	if m.expanded {
+		m.logManager = manager.Name()
+		m.logLines = nil
+	}
+
+	progressCb := m.progressCallback(manager.Name())
+	dryRun := m.opts.DryRun
+	showDelay := m.opts.Animations
+
+	return m, func() tea.Msg {
 		start := time.Now()
 		logger.Info("Starting update for %s", manager.Name())
 
-		// Handle dry-run mode
-		if m.opts.DryRun {
-			logger.Info("Dry-run: skipping %s", manager.Name())
-			time.Sleep(200 * time.Millisecond) // Small visual delay
+		if dryRun {
+			if showDelay {
+				select {
+				case <-time.After(150 * time.Millisecond):
+				case <-managerCtx.Done():
+				}
+			}
+			cancel()
 			return UpdateMsg{
 				ManagerName: manager.Name(),
-				Result: ecosystem.Result{
-					Success: true,
-					Message: "skipped (dry-run)",
-					Updated: 0,
-				},
-				Duration: time.Since(start),
+				Result:      ecosystem.Result{Success: true, Message: "skipped (dry-run)"},
+				Duration:    time.Since(start),
 			}
 		}
 
-		// Use configurable timeout
-		res := m.runUpdateWithRetries(manager, m.progressCallback(manager.Name()))
+		res := m.runUpdateWithRetries(managerCtx, manager, progressCb)
+		cancel()
 		return UpdateMsg{
 			ManagerName: manager.Name(),
 			Result:      res,
@@ -164,7 +347,7 @@ func (m Model) progressCallback(managerName string) runner.ProgressCallback {
 	return m.progressRelay.Callback(managerName)
 }
 
-func (m Model) runUpdateWithRetries(manager ecosystem.PackageManager, progressCb runner.ProgressCallback) ecosystem.Result {
+func (m Model) runUpdateWithRetries(ctx context.Context, manager ecosystem.PackageManager, progressCb runner.ProgressCallback) ecosystem.Result {
 	attempts := m.opts.Retries + 1
 	if attempts < 1 {
 		attempts = 1
@@ -172,407 +355,312 @@ func (m Model) runUpdateWithRetries(manager ecosystem.PackageManager, progressCb
 
 	var res ecosystem.Result
 	for attempt := 1; attempt <= attempts; attempt++ {
-		timeoutCtx, cancel := context.WithTimeout(m.ctx, time.Duration(m.opts.TimeoutMinutes)*time.Minute)
+		timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(m.opts.TimeoutMinutes)*time.Minute)
 		res = manager.UpdateAllWithProgress(timeoutCtx, progressCb)
 		cancel()
 
-		if res.Success || attempt == attempts {
-			if !res.Success && attempt > 1 {
-				res.Message = fmt.Sprintf("%s (failed after %d attempts)", res.Message, attempt)
+		if res.Success || attempt == attempts || ctx.Err() != nil {
+			if !res.Success {
+				switch {
+				case errors.Is(ctx.Err(), context.Canceled):
+					res.Message = "cancelled"
+				case attempt > 1:
+					res.Message = fmt.Sprintf("%s (failed after %d attempts)", res.Message, attempt)
+				}
 			}
 			return res
 		}
 
-		baseDelay := m.opts.RetryDelay
-		delay := retry.ComputeDelay(attempt+1, baseDelay, m.opts.RetryBackoff, m.opts.MaxRetryDelay)
+		delay := retry.ComputeDelay(attempt+1, m.opts.RetryDelay, m.opts.RetryBackoff, m.opts.MaxRetryDelay)
 		if delay > 0 {
-			time.Sleep(delay)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return res
+			}
 		}
 	}
 
 	return res
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
 
-	case scanDoneMsg:
-		m.detectedManagers = msg.managers
-		if len(m.detectedManagers) == 0 {
-			m.state = stateDone
-			return m, tea.Quit
-		}
-		m.selection = make([]bool, len(m.detectedManagers))
-		for i := range m.selection {
-			m.selection[i] = true
-		}
-		if m.opts.SelectManagers {
-			m.state = stateSelectManagers
-			return m, nil
-		}
-		m.state = stateUpdating
-		m.currentStart = time.Now()
-		return m, m.runNextUpdate()
-
-	case UpdateMsg:
-		m.currentPackageName = ""
-		m.currentProgress = 0
-		m.currentStatus = ""
-
-		if !msg.Result.Success {
-			if m.opts.NonStop {
-				m.results = append(m.results, msg)
-				m.currentManagerIdx++
-				if m.currentManagerIdx >= len(m.detectedManagers) {
-					m.state = stateDone
-					return m, tea.Quit
-				}
-				m.currentStart = time.Now()
-				return m, m.runNextUpdate()
+	switch m.state {
+	case stateScanning:
+		switch key {
+		case "ctrl+c", "q", "Q", "esc":
+			logger.Info("User interrupted during scan")
+			m.cancelled = true
+			m.note = "Cancelled — no updates were run."
+			if m.cancelAll != nil {
+				m.cancelAll()
 			}
-
-			m.pendingFailure = &msg
-			m.state = stateErrorPrompt
+			m.transition(stateDone)
 			return m, nil
 		}
 
-		m.results = append(m.results, msg)
-
-		m.currentManagerIdx++
-
-		if m.currentManagerIdx >= len(m.detectedManagers) {
-			m.state = stateDone
-			return m, tea.Quit
-		}
-		m.currentStart = time.Now()
-		return m, m.runNextUpdate()
-
-	case ProgressMsg:
-		if m.currentManagerIdx < len(m.detectedManagers) {
-			currentName := m.detectedManagers[m.currentManagerIdx].Name()
-			if strings.EqualFold(currentName, msg.ManagerName) {
-				m.currentPackageName = msg.PackageName
-				m.currentProgress = msg.Percentage
-				m.currentStatus = msg.Status
-			}
-		}
-		return m, nil
-
-	case tea.KeyMsg:
-		switch msg.String() {
+	case stateSelectManagers:
+		switch key {
 		case "up", "k":
-			if m.state == stateSelectManagers {
-				if m.selectIdx > 0 {
-					m.selectIdx--
-				}
-				return m, nil
+			if m.selectIdx > 0 {
+				m.selectIdx--
 			}
 		case "down", "j":
-			if m.state == stateSelectManagers {
-				if m.selectIdx < len(m.selection)-1 {
-					m.selectIdx++
-				}
-				return m, nil
+			if m.selectIdx < len(m.selection)-1 {
+				m.selectIdx++
 			}
-		case " ":
-			if m.state == stateSelectManagers {
-				if len(m.selection) > 0 {
-					m.selection[m.selectIdx] = !m.selection[m.selectIdx]
-				}
-				return m, nil
+		case "home":
+			m.selectIdx = 0
+		case "end":
+			if n := len(m.selection); n > 0 {
+				m.selectIdx = n - 1
+			}
+		case "space":
+			if len(m.selection) > 0 {
+				m.selection[m.selectIdx] = !m.selection[m.selectIdx]
 			}
 		case "a", "A":
-			if m.state == stateSelectManagers {
-				for i := range m.selection {
-					m.selection[i] = true
-				}
-				return m, nil
+			for i := range m.selection {
+				m.selection[i] = true
 			}
 		case "n", "N":
-			if m.state == stateSelectManagers {
-				for i := range m.selection {
-					m.selection[i] = false
+			for i := range m.selection {
+				m.selection[i] = false
+			}
+		case "enter", "r", "R":
+			selected := make([]ecosystem.PackageManager, 0, len(m.detectedManagers))
+			for i, mgr := range m.detectedManagers {
+				if i < len(m.selection) && m.selection[i] {
+					selected = append(selected, mgr)
 				}
+			}
+			m.detectedManagers = selected
+			m.currentManagerIdx = 0
+			if len(m.detectedManagers) == 0 {
+				m.note = "No ecosystems selected."
+				m.transition(stateDone)
 				return m, nil
 			}
-		case "ctrl+c":
-			if m.state == stateUpdating {
-				logger.Info("User pressed Ctrl+C - requesting cancellation confirmation")
-				m.state = stateConfirmCancel
-				return m, nil
-			} else if m.state == stateConfirmCancel {
-				// Already in confirm state, ignore second Ctrl+C
-				return m, nil
-			} else {
-				logger.Info("User interrupted")
-				return m, tea.Quit
+			m.transition(stateUpdating)
+			return m.startNext()
+		case "q", "Q", "esc", "ctrl+c":
+			logger.Info("User quit from selection")
+			m.cancelled = true
+			m.note = "Cancelled — no updates were run."
+			if m.cancelAll != nil {
+				m.cancelAll()
 			}
-		case "q", "Q":
-			if m.state == stateSelectManagers {
-				logger.Info("User quit from selection")
-				return m, tea.Quit
-			}
-			if m.state == stateErrorPrompt {
-				logger.Info("User quit after error")
-				if m.pendingFailure != nil {
-					m.results = append(m.results, *m.pendingFailure)
-					m.pendingFailure = nil
-				}
-				m.state = stateDone
-				return m, tea.Quit
-			}
-			if m.state != stateConfirmCancel {
-				logger.Info("User quit")
-				return m, tea.Quit
-			}
-		case "r", "R", "enter":
-			if m.state == stateSelectManagers {
-				selected := make([]ecosystem.PackageManager, 0, len(m.detectedManagers))
-				for i, mgr := range m.detectedManagers {
-					if i < len(m.selection) && m.selection[i] {
-						selected = append(selected, mgr)
-					}
-				}
-				m.detectedManagers = selected
-				m.currentManagerIdx = 0
-				if len(m.detectedManagers) == 0 {
-					m.state = stateDone
-					return m, tea.Quit
-				}
-				m.state = stateUpdating
-				m.currentStart = time.Now()
-				return m, m.runNextUpdate()
-			}
-			if m.state == stateErrorPrompt {
-				m.pendingFailure = nil
-				m.state = stateUpdating
-				m.currentStart = time.Now()
-				return m, m.runNextUpdate()
-			} else if m.state == stateConfirmCancel {
-				logger.Info("User confirmed cancellation")
-				if m.cancelCtx != nil {
-					m.cancelCtx()
-				}
-				m.state = stateDone
-				return m, tea.Quit
-			}
-		case "s", "S":
-			if m.state == stateErrorPrompt {
-				if m.pendingFailure != nil {
-					m.results = append(m.results, *m.pendingFailure)
-					m.pendingFailure = nil
-				}
-				m.currentManagerIdx++
-				if m.currentManagerIdx >= len(m.detectedManagers) {
-					m.state = stateDone
-					return m, tea.Quit
-				}
-				m.state = stateUpdating
-				m.currentStart = time.Now()
-				return m, m.runNextUpdate()
-			} else if m.state == stateConfirmCancel {
-				logger.Info("User declined cancellation - resuming")
-				m.state = stateUpdating
-				return m, nil
-			}
+			m.transition(stateDone)
+			return m, nil
 		}
 
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+	case stateUpdating:
+		switch key {
+		case "d", "D":
+			m.toggleDetails()
+			return m, nil
+		case "ctrl+c", "q", "Q":
+			logger.Info("User requested cancellation - awaiting confirmation")
+			m.transition(stateConfirmCancel)
+			return m, nil
+		case "esc":
+			if m.expanded {
+				m.collapseDetails()
+				return m, nil
+			}
+			logger.Info("User requested cancellation - awaiting confirmation")
+			m.transition(stateConfirmCancel)
+			return m, nil
+		}
+
+	case stateErrorPrompt:
+		switch key {
+		case "d", "D":
+			m.toggleDetails()
+			return m, nil
+		case "r", "R", "enter":
+			m.pendingFailure = nil
+			m.collapseDetails()
+			// Drop the recorded failure and re-run the same manager.
+			if n := len(m.results); n > 0 && m.currentManagerIdx > 0 {
+				m.results = m.results[:n-1]
+				m.currentManagerIdx--
+			}
+			m.transition(stateUpdating)
+			return m.startNext()
+		case "s", "S":
+			m.pendingFailure = nil
+			m.collapseDetails()
+			if m.currentManagerIdx >= len(m.detectedManagers) {
+				m.transition(stateDone)
+				return m, nil
+			}
+			m.transition(stateUpdating)
+			return m.startNext()
+		case "esc":
+			if m.expanded {
+				m.collapseDetails()
+				return m, nil
+			}
+			logger.Info("User quit after error")
+			m.pendingFailure = nil
+			m.transition(stateDone)
+			return m, nil
+		case "q", "Q", "ctrl+c":
+			logger.Info("User quit after error")
+			m.pendingFailure = nil
+			m.transition(stateDone)
+			return m, nil
+		}
+
+	case stateConfirmCancel:
+		switch key {
+		case "y", "Y", "enter", "r", "R":
+			logger.Info("User confirmed cancellation")
+			m.cancelUpdates()
+			m.transition(stateDone)
+			return m, tea.Quit
+		case "n", "N", "esc", "s", "S", "q", "Q":
+			logger.Info("User declined cancellation - resuming")
+			if m.holdNext {
+				m.holdNext = false
+				m.transition(stateUpdating)
+				return m.startNext()
+			}
+			m.transition(stateUpdating)
+			return m, nil
+		}
+
+	case stateDone:
+		return m, tea.Quit
 	}
 
 	return m, nil
 }
 
-func (m Model) View() string {
-	var b strings.Builder
-
-	// Header
-	b.WriteString("\n")
-	b.WriteString(Brand())
-	b.WriteString("\n")
-	b.WriteString(SubtleStyle.Render("  Unified Windows Package Orchestration Engine"))
-	b.WriteString("\n")
-	b.WriteString(Divider())
-	b.WriteString("\n\n")
-
-	switch m.state {
-	case stateScanning:
-		b.WriteString(fmt.Sprintf("  %s Scanning installed ecosystems...\n", m.spinner.View()))
-		b.WriteString(SubtleStyle.Render("    Detecting package managers on your system\n"))
-
-	case stateSelectManagers:
-		b.WriteString(DimBoldStyle.Render("  Select managers to update"))
-		b.WriteString("\n\n")
-		for i, mgr := range m.detectedManagers {
-			cursor := " "
-			if i == m.selectIdx {
-				cursor = ">"
-			}
-			mark := "[ ]"
-			if i < len(m.selection) && m.selection[i] {
-				mark = "[x]"
-			}
-			line := fmt.Sprintf("  %s %s %s", cursor, mark, mgr.Name())
-			if i == m.selectIdx {
-				line = HighlightStyle.Render(line)
-			}
-			b.WriteString(line + "\n")
-		}
-		b.WriteString("\n")
-		b.WriteString(SubtleStyle.Render("  [space] toggle  [a] all  [n] none  [enter] start  [q] quit"))
-
-	case stateUpdating, stateErrorPrompt:
-		// Progress indicator
-		completed := m.currentManagerIdx
-		total := len(m.detectedManagers)
-		if m.state == stateErrorPrompt {
-			completed = m.currentManagerIdx + 1
-		}
-		progress := fmt.Sprintf("[%d/%d]", completed, total)
-		b.WriteString(fmt.Sprintf("  %s %s\n\n", DimBoldStyle.Render(progress), SubtleStyle.Render("Updating ecosystems")))
-		elapsed := time.Since(m.startTime).Round(time.Second)
-		if remaining, ok := m.estimatedRemaining(); ok {
-			b.WriteString(SubtleStyle.Render(fmt.Sprintf("  Elapsed: %s  ETA: %s", elapsed, remaining.Round(time.Second))))
-			b.WriteString("\n\n")
-		} else {
-			b.WriteString(SubtleStyle.Render(fmt.Sprintf("  Elapsed: %s", elapsed)))
-			b.WriteString("\n\n")
-		}
-
-		for i, mgr := range m.detectedManagers {
-			if i < m.currentManagerIdx {
-				// Completed
-				res := m.results[i]
-				if res.Result.Success {
-					if res.Result.Updated > 0 {
-						b.WriteString(fmt.Sprintf("%s %s  %s\n",
-							Checkmark(),
-							BoldStyle.Render(mgr.Name()),
-							SubtleStyle.Render(fmt.Sprintf("(%d updated)", res.Result.Updated))))
-					} else {
-						b.WriteString(fmt.Sprintf("%s %s  %s\n",
-							Checkmark(),
-							BoldStyle.Render(mgr.Name()),
-							SubtleStyle.Render(res.Result.Message)))
-					}
-				} else {
-					b.WriteString(fmt.Sprintf("%s %s  %s\n",
-						Crossmark(),
-						BoldStyle.Render(mgr.Name()),
-						ErrorStyle.Render(res.Result.Message)))
-				}
-			} else if i == m.currentManagerIdx {
-				if m.state == stateErrorPrompt {
-					res := m.pendingFailure
-					if res == nil {
-						break
-					}
-					b.WriteString(fmt.Sprintf("%s %s  %s\n",
-						Crossmark(),
-						BoldStyle.Render(mgr.Name()),
-						ErrorStyle.Render(res.Result.Message)))
-					if res.Result.Error != nil {
-						b.WriteString(fmt.Sprintf("    %s\n", SubtleStyle.Render(res.Result.Error.Error())))
-					}
-					b.WriteString("\n")
-					b.WriteString(WarningStyle.Render(fmt.Sprintf("  ⚠ %s failed. ", mgr.Name())))
-					b.WriteString(SubtleStyle.Render("[r]etry [s]kip [q]uit "))
-				} else {
-					// Currently updating
-					b.WriteString(fmt.Sprintf("  %s %s\n",
-						m.spinner.View(),
-						HighlightStyle.Render(mgr.Name())))
-
-					// Show current status and progress if available
-					statusLine := strings.TrimSpace(m.currentStatus)
-					if m.currentPackageName != "" {
-						if statusLine != "" {
-							statusLine = fmt.Sprintf("%s: %s", statusLine, m.currentPackageName)
-						} else {
-							statusLine = m.currentPackageName
-						}
-					}
-					if statusLine != "" {
-						if m.currentProgress > 0 {
-							statusLine = fmt.Sprintf("%s (%d%%)", statusLine, m.currentProgress)
-						}
-						b.WriteString(fmt.Sprintf("    %s\n", SubtleStyle.Render(statusLine)))
-					}
-					elapsedCurrent := time.Since(m.currentStart).Round(time.Second)
-					if expected := m.expectedDuration(mgr.Name()); expected > 0 {
-						b.WriteString(fmt.Sprintf("    %s\n", SubtleStyle.Render(fmt.Sprintf("elapsed %s / ~%s", elapsedCurrent, expected.Round(time.Second)))))
-					} else if !m.currentStart.IsZero() {
-						b.WriteString(fmt.Sprintf("    %s\n", SubtleStyle.Render(fmt.Sprintf("elapsed %s", elapsedCurrent))))
-					}
-				}
-			} else {
-				// Pending
-				b.WriteString(fmt.Sprintf("%s %s\n",
-					Pending(),
-					SubtleStyle.Render(mgr.Name())))
-			}
-		}
-
-	case stateConfirmCancel:
-		b.WriteString(fmt.Sprintf("  %s\n\n", WarningStyle.Render("⚠ Cancel package updates?")))
-		b.WriteString(WarningStyle.Render("  This will stop the current operation.\n"))
-		b.WriteString("\n")
-		b.WriteString(SubtleStyle.Render("  Are you sure? "))
-		b.WriteString(WarningStyle.Render("[y/N] "))
-
-	case stateDone:
-		if len(m.detectedManagers) == 0 {
-			b.WriteString(WarningStyle.Render("  ⚠ No package managers detected on this system.\n"))
-		} else {
-			elapsed := time.Since(m.startTime).Round(time.Millisecond)
-			b.WriteString(fmt.Sprintf("  %s  %s\n",
-				SuccessStyle.Render("Done"),
-				SubtleStyle.Render(fmt.Sprintf("completed in %s", elapsed))))
-		}
+// activeManagerName returns the manager whose output the details pane shows.
+func (m Model) activeManagerName() string {
+	if m.state == stateErrorPrompt && m.pendingFailure != nil {
+		return m.pendingFailure.ManagerName
 	}
-
-	b.WriteString("\n")
-	return b.String()
+	if m.currentManagerIdx < len(m.detectedManagers) {
+		return m.detectedManagers[m.currentManagerIdx].Name()
+	}
+	return ""
 }
 
-func (m Model) expectedDuration(managerName string) time.Duration {
-	if m.previousDurations == nil {
-		return 0
+// toggleDetails expands or collapses the live output pane.
+func (m *Model) toggleDetails() {
+	if m.expanded {
+		m.collapseDetails()
+		return
 	}
-	if d, ok := m.previousDurations[managerName]; ok {
-		return d
+	m.expanded = true
+	m.seedLog()
+	if m.progressRelay != nil {
+		m.progressRelay.SubscribeLogs(true)
 	}
-	return 0
+}
+
+func (m *Model) collapseDetails() {
+	m.expanded = false
+	m.logManager = ""
+	m.logLines = nil
+	if m.progressRelay != nil {
+		m.progressRelay.SubscribeLogs(false)
+	}
+}
+
+// seedLog loads the current tail of the active manager's retained output.
+func (m *Model) seedLog() {
+	name := m.activeManagerName()
+	m.logManager = name
+	m.logLines = nil
+	if name == "" || m.progressRelay == nil {
+		return
+	}
+	m.logLines = m.progressRelay.LogTail(name)
+}
+
+func (m *Model) cancelUpdates() {
+	m.cancelled = true
+	if m.cancelCtx != nil {
+		m.cancelCtx()
+	}
+	if m.cancelAll != nil {
+		m.cancelAll()
+	}
+	// Record the interrupted manager so the report reflects the partial run.
+	if !m.holdNext && m.currentManagerIdx < len(m.detectedManagers) {
+		name := m.detectedManagers[m.currentManagerIdx].Name()
+		m.results = append(m.results, UpdateMsg{
+			ManagerName: name,
+			Result:      ecosystem.Result{Success: false, Message: "cancelled by user"},
+			Duration:    time.Since(m.currentStart),
+		})
+		m.currentManagerIdx++
+	}
+}
+
+// transition moves to a new state, arming a short border pulse.
+func (m *Model) transition(s state) {
+	if s == m.state {
+		return
+	}
+	from := m.borderColor()
+	m.state = s
+	if s == stateDone && m.doneAt.IsZero() {
+		m.doneAt = time.Now()
+	}
+	if m.opts.Animations {
+		m.borderColors = pulseColors(from, stateColor(s), pulseSteps)
+		m.pulseStep = 0
+	}
+}
+
+func (m Model) borderColor() color.Color {
+	if m.pulseStep < len(m.borderColors) {
+		return m.borderColors[m.pulseStep]
+	}
+	return stateColor(m.state)
+}
+
+func (m *Model) computeExpected() {
+	m.expectedTotal = 0
+	for _, mgr := range m.detectedManagers {
+		if d, ok := m.previousDurations[mgr.Name()]; ok {
+			m.expectedTotal += d
+		}
+	}
 }
 
 func (m Model) estimatedRemaining() (time.Duration, bool) {
-	if len(m.detectedManagers) == 0 || m.previousDurations == nil {
+	if m.expectedTotal == 0 {
 		return 0, false
 	}
-
-	var expectedTotal time.Duration
-	for _, mgr := range m.detectedManagers {
-		if d, ok := m.previousDurations[mgr.Name()]; ok {
-			expectedTotal += d
-		}
-	}
-	if expectedTotal == 0 {
-		return 0, false
-	}
-
-	elapsed := time.Since(m.startTime)
-	remaining := expectedTotal - elapsed
+	remaining := m.expectedTotal - time.Since(m.startTime)
 	if remaining <= 0 {
 		return 0, false
 	}
-
 	return remaining, true
 }
 
-// GetResults returns the execution results to be printed cleanly on exit
+func (m Model) overallPercent() (int, bool) {
+	total := len(m.detectedManagers)
+	if total == 0 {
+		return 0, false
+	}
+	frac := 0.0
+	if m.currentManagerIdx < total && m.currentProgress > 0 {
+		frac = float64(m.currentProgress) / 100
+	}
+	pct := int((float64(m.currentManagerIdx)+frac)/float64(total)*100 + 0.5)
+	return min(max(pct, 0), 100), true
+}
+
+// GetResults returns the execution results to be printed cleanly on exit.
 func (m Model) GetResults() []UpdateMsg {
 	return m.results
 }

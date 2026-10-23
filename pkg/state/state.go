@@ -77,16 +77,25 @@ func Save(path string, st RunState) (string, error) {
 		return "", err
 	}
 
-	return resolved, os.WriteFile(resolved, data, 0644)
+	if err := paths.WriteFileAtomic(resolved, data, 0644); err != nil {
+		return "", err
+	}
+	return resolved, nil
 }
 
-// UpdateFromReport builds a new RunState based on the latest report.
-func UpdateFromReport(rep report.RunReport) RunState {
+// UpdateFromReport merges the latest report into the previous run state.
+// Managers that did not run this time keep their previous history so ETA
+// estimates survive filtered runs (e.g. `--only winget`).
+func UpdateFromReport(previous RunState, rep report.RunReport) RunState {
 	st := RunState{
 		LastRunAt:      rep.EndedAt,
 		LastDurationMs: rep.DurationMs,
 		LastSuccess:    rep.Summary.Failed == 0,
-		Managers:       make(map[string]ManagerState),
+		Managers:       make(map[string]ManagerState, len(previous.Managers)+len(rep.Managers)),
+	}
+
+	for name, mgr := range previous.Managers {
+		st.Managers[name] = mgr
 	}
 
 	for _, mgr := range rep.Managers {

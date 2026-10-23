@@ -46,7 +46,14 @@ func (m *BunManager) UpdateAllWithProgress(ctx context.Context, progressCb runne
 }
 
 func (m *BunManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "bun", "pm", "cache", "rm")
+	res := runner.RunSilent(ctx, "bun", "pm", "cache", "rm")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clean Bun cache.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "Bun cache cleaned.",

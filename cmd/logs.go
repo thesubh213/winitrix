@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/thesubh213/winitrix/pkg/paths"
+	"github.com/thesubh213/winitrix/pkg/tui"
 )
 
 var (
@@ -25,32 +26,32 @@ var logsCmd = &cobra.Command{
 		if logsBundle {
 			bundlePath, err := createLogBundle(logsBundlePath)
 			if err != nil {
-				fmt.Printf("Failed to create bundle: %v\n", err)
+				tui.Printf("Failed to create bundle: %v\n", err)
 				return
 			}
-			fmt.Printf("Bundle created: %s\n", bundlePath)
+			tui.Printf("Bundle created: %s\n", bundlePath)
 			return
 		}
 
 		exePath, err := os.Executable()
 		if err != nil {
-			fmt.Printf("Failed to determine executable location: %v\n", err)
+			tui.Printf("Failed to determine executable location: %v\n", err)
 			return
 		}
 
 		logFile := filepath.Join(filepath.Dir(exePath), "logs", "winitrix.log")
 
 		if _, err := os.Stat(logFile); os.IsNotExist(err) {
-			fmt.Println("No logs found. Run an update first.")
+			tui.Println("No logs found. Run an update first.")
 			return
 		}
 
-		fmt.Println("Opening logs...")
+		tui.Println("Opening logs...")
 		// Use notepad as fallback or default file association
 		execCmd := exec.Command("cmd", "/c", "start", "", logFile)
 		err = execCmd.Start()
 		if err != nil {
-			fmt.Printf("Failed to open logs: %v\n", err)
+			tui.Printf("Failed to open logs: %v\n", err)
 		}
 	},
 }
@@ -78,10 +79,10 @@ func createLogBundle(outputPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	zipWriter := zip.NewWriter(file)
-	defer zipWriter.Close()
+	defer func() { _ = zipWriter.Close() }()
 
 	logFile, _ := resolveLogPath()
 	configPath, _ := paths.DefaultConfigPath()
@@ -118,7 +119,7 @@ func addFileToZip(zipWriter *zip.Writer, path string, name string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	entry, err := zipWriter.Create(name)
 	if err != nil {

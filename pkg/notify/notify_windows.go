@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/thesubh213/winitrix/pkg/runner"
 )
@@ -31,7 +32,12 @@ func Send(title, message string) error {
 		psSingleQuoted(messageEsc),
 	)
 
-	res := runner.RunSilent(context.Background(), "powershell", "-NoProfile", "-Command", script)
+	// Bound the toast helper so a stuck PowerShell process can never delay
+	// application exit.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	res := runner.RunSilent(ctx, "powershell", "-NoProfile", "-Command", script)
 	return res.Err
 }
 

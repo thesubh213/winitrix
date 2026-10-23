@@ -38,7 +38,14 @@ func (m *DotnetManager) UpdateAllWithProgress(ctx context.Context, progressCb ru
 }
 
 func (m *DotnetManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "dotnet", "nuget", "locals", "all", "--clear")
+	res := runner.RunSilent(ctx, "dotnet", "nuget", "locals", "all", "--clear")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clear NuGet cache.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "Dotnet nuget cache cleared.",

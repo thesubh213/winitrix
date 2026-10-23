@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/thesubh213/winitrix/pkg/tui"
 )
 
 var (
@@ -33,10 +34,14 @@ var scheduleCmd = &cobra.Command{
 
 		exePath, err := os.Executable()
 		if err != nil {
-			fmt.Printf("Failed to resolve executable path: %v\n", err)
+			tui.Printf("Failed to resolve executable path: %v\n", err)
 			return
 		}
-		exePath, _ = filepath.Abs(exePath)
+		exePath, err = filepath.Abs(exePath)
+		if err != nil {
+			tui.Printf("Failed to resolve absolute executable path: %v\n", err)
+			return
+		}
 
 		argsList := []string{}
 		if scheduleSilent {
@@ -52,7 +57,7 @@ var scheduleCmd = &cobra.Command{
 		scheduledCommand := buildCommandLine(exePath, argsList)
 		createArgs, err := buildScheduleArgs(scheduleTaskName, scheduledCommand)
 		if err != nil {
-			fmt.Printf("Invalid schedule settings: %v\n", err)
+			tui.Printf("Invalid schedule settings: %v\n", err)
 			return
 		}
 
@@ -60,26 +65,26 @@ var scheduleCmd = &cobra.Command{
 			deleteArgs := []string{"/Delete", "/TN", scheduleTaskName, "/F"}
 			if scheduleApply {
 				if err := runSchtasks(deleteArgs); err != nil {
-					fmt.Printf("Failed to remove task: %v\n", err)
+					tui.Printf("Failed to remove task: %v\n", err)
 					return
 				}
-				fmt.Println("Task removed.")
+				tui.Println("Task removed.")
 			} else {
-				fmt.Printf("schtasks %s\n", strings.Join(deleteArgs, " "))
+				tui.Printf("schtasks %s\n", strings.Join(deleteArgs, " "))
 			}
 			return
 		}
 
 		if scheduleApply {
 			if err := runSchtasks(createArgs); err != nil {
-				fmt.Printf("Failed to create task: %v\n", err)
+				tui.Printf("Failed to create task: %v\n", err)
 				return
 			}
-			fmt.Println("Task created.")
+			tui.Println("Task created.")
 			return
 		}
 
-		fmt.Printf("schtasks %s\n", strings.Join(createArgs, " "))
+		tui.Printf("schtasks %s\n", strings.Join(createArgs, " "))
 	},
 }
 

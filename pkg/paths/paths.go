@@ -47,6 +47,48 @@ func EnsureDir(dir string) error {
 	return os.MkdirAll(dir, 0755)
 }
 
+// WriteFileAtomic writes data to path by way of a temporary file and a rename,
+// so a crash or forced termination can never leave a truncated file behind.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := EnsureDir(dir); err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+
+	tmpName = ""
+	return nil
+}
+
 // DefaultConfigPath returns the default config file path.
 func DefaultConfigPath() (string, error) {
 	dir, err := ConfigDir()

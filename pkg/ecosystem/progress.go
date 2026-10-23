@@ -214,13 +214,20 @@ func progressFromLine(status, packageName, detail string) ProgressUpdate {
 
 func extractSubjectAfterKeyword(line, keyword string) string {
 	lowerLine := strings.ToLower(line)
-	keywordLower := strings.ToLower(keyword)
-	idx := strings.Index(lowerLine, keywordLower)
+	idx := strings.Index(lowerLine, strings.ToLower(keyword))
 	if idx < 0 {
 		return ""
 	}
 
-	subject := strings.TrimSpace(line[idx+len(keyword):])
+	start := idx + len(keyword)
+	// strings.ToLower is not guaranteed to preserve byte lengths (exotic
+	// runes such as U+023A expand), so guard the slice against the original
+	// string rather than trusting the lowercased index.
+	if start > len(line) {
+		return ""
+	}
+
+	subject := strings.TrimSpace(line[start:])
 	subject = strings.TrimPrefix(subject, ":")
 	return strings.TrimSpace(subject)
 }

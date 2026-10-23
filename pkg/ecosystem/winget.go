@@ -2,7 +2,6 @@ package ecosystem
 
 import (
 	"context"
-	"regexp"
 	"strings"
 
 	"github.com/thesubh213/winitrix/pkg/elevation"
@@ -64,20 +63,7 @@ func (m *WingetManager) UpdateAll(ctx context.Context) Result {
 func (m *WingetManager) UpdateAllWithProgress(ctx context.Context, progressCb runner.ProgressCallback) Result {
 	logger.Debug("Starting Winget update with progress tracking")
 
-	// Create a progress callback that parses winget output
-	wrappedCallback := func(line string) {
-		if progressCb != nil {
-			progressCb(line)
-		}
-
-		// Parse winget output for progress information
-		// Winget outputs lines like:
-		// "Installing: Package Name [version]"
-		// "Successfully installed Package Name [version]"
-		parseWingetProgress(line)
-	}
-
-	streamRes := runner.RunWithProgress(ctx, wrappedCallback, "winget", "upgrade", "--all", "--accept-source-agreements", "--accept-package-agreements")
+	streamRes := runner.RunWithProgress(ctx, progressCb, "winget", "upgrade", "--all", "--accept-source-agreements", "--accept-package-agreements")
 
 	if streamRes.Err != nil {
 		if elevation.CheckAdminRequirement(streamRes.Stdout + streamRes.Stderr) {
@@ -104,16 +90,6 @@ func (m *WingetManager) UpdateAllWithProgress(ctx context.Context, progressCb ru
 		Success: true,
 		Message: "Successfully updated Winget packages",
 		Updated: updated,
-	}
-}
-
-// parseWingetProgress extracts package name from winget output lines
-func parseWingetProgress(line string) {
-	// Try to match "Installing: Package [version]" pattern
-	re := regexp.MustCompile(`Installing:\s+(.+?)\s+\[.*\]`)
-	matches := re.FindStringSubmatch(line)
-	if len(matches) > 1 {
-		logger.Debug("Installing package: %s", matches[1])
 	}
 }
 

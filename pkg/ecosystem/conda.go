@@ -46,7 +46,14 @@ func (m *CondaManager) UpdateAllWithProgress(ctx context.Context, progressCb run
 }
 
 func (m *CondaManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "conda", "clean", "-a", "-y")
+	res := runner.RunSilent(ctx, "conda", "clean", "-a", "-y")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clean Conda cache.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "Conda cache cleaned.",

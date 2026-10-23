@@ -22,7 +22,7 @@ var configShowCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, resolvedPath, found, err := config.Load(configPath)
 		if err != nil {
-			fmt.Printf("Failed to load config: %v\n", err)
+			tui.Printf("Failed to load config: %v\n", err)
 			return
 		}
 
@@ -62,28 +62,28 @@ func buildConfigShowOutput(settings config.EffectiveSettings, loaded bool) confi
 func printConfigShowJSON(output configShowOutput) {
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		fmt.Printf("Failed to render config as JSON: %v\n", err)
+		tui.Printf("Failed to render config as JSON: %v\n", err)
 		return
 	}
 
-	fmt.Println(string(data))
+	tui.Println(string(data))
 }
 
 func printConfigShowText(output configShowOutput) {
 	settings := output.Settings
 
-	fmt.Println()
-	fmt.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  configuration"))
-	fmt.Println(tui.Divider())
-	fmt.Println()
+	tui.Println()
+	tui.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  configuration"))
+	tui.Println(tui.Divider())
+	tui.Println()
 
 	printConfigRow("Source", output.Source)
 	printConfigRow("Profile", valueOrDefault(settings.Profile, "(none)"))
 	printConfigRow("Config path", valueOrDefault(settings.ConfigPath, "(default location)"))
 
-	fmt.Println()
-	fmt.Println(tui.DimBoldStyle.Render("  Runtime"))
-	fmt.Println()
+	tui.Println()
+	tui.Println(tui.DimBoldStyle.Render("  Runtime"))
+	tui.Println()
 
 	printConfigRow("Dry run", boolLabel(settings.DryRun))
 	printConfigRow("Silent", boolLabel(settings.Silent))
@@ -97,27 +97,35 @@ func printConfigShowText(output configShowOutput) {
 	printConfigRow("Max retry delay", fmt.Sprintf("%d seconds", settings.MaxRetryDelaySeconds))
 	printConfigRow("Select managers", boolLabel(settings.SelectManagers))
 
-	fmt.Println()
-	fmt.Println(tui.DimBoldStyle.Render("  Filters"))
-	fmt.Println()
+	tui.Println()
+	tui.Println(tui.DimBoldStyle.Render("  Interface"))
+	tui.Println()
+
+	printConfigRow("Animations", boolLabel(settings.Animations))
+	printConfigRow("Alt screen", boolLabel(settings.AltScreen))
+	printConfigRow("ASCII glyphs", boolLabel(settings.ASCII))
+
+	tui.Println()
+	tui.Println(tui.DimBoldStyle.Render("  Filters"))
+	tui.Println()
 
 	printConfigRow("Only", valueOrDefault(strings.Join(settings.Only, ", "), "(none)"))
 	printConfigRow("Exclude", valueOrDefault(strings.Join(settings.Exclude, ", "), "(none)"))
 
-	fmt.Println()
-	fmt.Println(tui.DimBoldStyle.Render("  Notifications"))
-	fmt.Println()
+	tui.Println()
+	tui.Println(tui.DimBoldStyle.Render("  Notifications"))
+	tui.Println()
 
 	printConfigRow("Enabled", boolLabel(settings.NotificationsEnabled))
 	printConfigRow("Only on failure", boolLabel(settings.NotifyOnlyOnFailure))
 
-	fmt.Println()
-	fmt.Println(tui.Divider())
-	fmt.Println()
+	tui.Println()
+	tui.Println(tui.Divider())
+	tui.Println()
 }
 
 func printConfigRow(label, value string) {
-	fmt.Printf("  %-18s %s\n", tui.DimBoldStyle.Render(label+":"), value)
+	tui.Printf("  %-18s %s\n", tui.DimBoldStyle.Render(label+":"), value)
 }
 
 func boolLabel(value bool) string {

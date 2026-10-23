@@ -36,7 +36,14 @@ func (m *GoManager) UpdateAllWithProgress(ctx context.Context, progressCb runner
 }
 
 func (m *GoManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "go", "clean", "-cache", "-modcache")
+	res := runner.RunSilent(ctx, "go", "clean", "-cache", "-modcache")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clean Go caches.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "Go cache cleaned.",

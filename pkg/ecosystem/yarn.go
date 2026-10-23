@@ -9,7 +9,11 @@ import (
 	"github.com/thesubh213/winitrix/pkg/translator"
 )
 
-type YarnManager struct{}
+type YarnManager struct {
+	// version is cached from Detect (which already runs `yarn --version`) to
+	// avoid an extra process spawn per update.
+	version string
+}
 
 func NewYarnManager() *YarnManager {
 	return &YarnManager{}
@@ -21,13 +25,26 @@ func (m *YarnManager) Name() string {
 
 func (m *YarnManager) Detect(ctx context.Context) bool {
 	res := runner.RunSilent(ctx, "yarn", "--version")
-	return res.Err == nil && res.Stdout != ""
+	if res.Err != nil || strings.TrimSpace(res.Stdout) == "" {
+		return false
+	}
+	m.version = strings.TrimSpace(res.Stdout)
+	return true
+}
+
+func (m *YarnManager) yarnVersion(ctx context.Context) string {
+	if m.version != "" {
+		return m.version
+	}
+	res := runner.RunSilent(ctx, "yarn", "--version")
+	m.version = strings.TrimSpace(res.Stdout)
+	return m.version
 }
 
 func (m *YarnManager) UpdateAll(ctx context.Context) Result {
 	// Detect Yarn version to handle Berry (2+) deprecation
-	versionRes := runner.RunSilent(ctx, "yarn", "--version")
-	if strings.HasPrefix(versionRes.Stdout, "2.") || strings.HasPrefix(versionRes.Stdout, "3.") || strings.HasPrefix(versionRes.Stdout, "4.") {
+	version := m.yarnVersion(ctx)
+	if strings.HasPrefix(version, "2.") || strings.HasPrefix(version, "3.") || strings.HasPrefix(version, "4.") {
 		return Result{
 			Success: true,
 			Message: "Yarn 2+ detected. Global upgrades are deprecated. Skipping.",
@@ -72,7 +89,14 @@ func (m *YarnManager) UpdateAllWithProgress(ctx context.Context, progressCb runn
 }
 
 func (m *YarnManager) Clean(ctx context.Context) Result {
-	runner.RunSilent(ctx, "yarn", "cache", "clean")
+	res := runner.RunSilent(ctx, "yarn", "cache", "clean")
+	if res.Err != nil {
+		return Result{
+			Success: false,
+			Message: "Failed to clean Yarn cache.",
+			Error:   res.Err,
+		}
+	}
 	return Result{
 		Success: true,
 		Message: "Yarn cache cleaned.",

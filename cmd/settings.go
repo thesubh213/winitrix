@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,12 +32,22 @@ func loadSettings(cmd *cobra.Command, _ []string) error {
 
 	cfg, resolvedPath, found, err := config.Load(configPath)
 	if err != nil {
-		return err
+		// A corrupt config must not make every command (including --version
+		// and doctor) unusable: warn and continue with built-in defaults.
+		fmt.Fprintf(os.Stderr, "winitrix: warning: could not load config %s: %v\n", configPath, err)
+		cfg = config.Config{}
+		resolvedPath = configPath
+		found = false
 	}
 
 	configFound = found
 
 	profile := config.ResolveProfile(cfg, profileName)
+	if profileName != "" {
+		if _, ok := cfg.Profiles[profileName]; !ok {
+			fmt.Fprintf(os.Stderr, "winitrix: warning: profile %q not found; using defaults\n", profileName)
+		}
+	}
 	settings := config.Effective(cfg, profile)
 	settings.Profile = profile
 	settings.ConfigPath = resolvedPath

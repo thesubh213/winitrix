@@ -10,10 +10,10 @@ import (
 func TestCheckPathVariables_ContainsEssentialPaths(t *testing.T) {
 	// Save and restore PATH
 	originalPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", originalPath)
+	defer func() { _ = os.Setenv("PATH", originalPath) }()
 
 	// Set a PATH that contains all essential entries
-	os.Setenv("PATH", `C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0`)
+	_ = os.Setenv("PATH", `C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0`)
 
 	ok, msg := CheckPathVariables(context.Background())
 	if !ok {
@@ -26,10 +26,10 @@ func TestCheckPathVariables_ContainsEssentialPaths(t *testing.T) {
 
 func TestCheckPathVariables_MissingEntries(t *testing.T) {
 	originalPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", originalPath)
+	defer func() { _ = os.Setenv("PATH", originalPath) }()
 
 	// Set a PATH missing some essential entries
-	os.Setenv("PATH", `C:\SomeOtherDir`)
+	_ = os.Setenv("PATH", `C:\SomeOtherDir`)
 
 	ok, msg := CheckPathVariables(context.Background())
 	if ok {

@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 	"github.com/thesubh213/winitrix/pkg/config"
 	"github.com/thesubh213/winitrix/pkg/ecosystem"
@@ -16,6 +17,7 @@ import (
 	"github.com/thesubh213/winitrix/pkg/retry"
 	"github.com/thesubh213/winitrix/pkg/state"
 	"github.com/thesubh213/winitrix/pkg/tui"
+	"golang.org/x/term"
 )
 
 var (
@@ -29,6 +31,7 @@ var (
 	retryDelay      int
 	onlyManagers    []string
 	excludeManagers []string
+	demoMode        bool
 )
 
 var rootCmd = &cobra.Command{
@@ -44,18 +47,26 @@ var rootCmd = &cobra.Command{
 
 		settings := ActiveSettings()
 
-		logger.Init()
-		defer logger.Close()
-
-		if err := tryAutoInstall(); err != nil {
-			logger.Error("Auto-install failed: %v", err)
+		// JSON consumers and piped runs must never see TUI frames.
+		if settings.JSON || !stdoutIsTerminal() {
+			settings.Silent = true
 		}
 
+		logger.Init()
 		if settings.Verbose {
+			logger.SetDebug(true)
 			logger.Info("Verbose mode enabled")
 		}
+		defer logger.Close()
 
-		ctx := context.Background()
+		if !demoMode {
+			if err := tryAutoInstall(); err != nil {
+				logger.Error("Auto-install failed: %v", err)
+			}
+		}
+
+		ctx, stop := interruptContext()
+		defer stop()
 		start := time.Now()
 		build := buildInfo()
 
@@ -67,13 +78,15 @@ var rootCmd = &cobra.Command{
 
 		if settings.Silent {
 			rep := runSilentMode(ctx, settings, build, start)
-			finalizeRun(settings, rep)
+			if !demoMode {
+				finalizeRun(settings, rep)
+			}
 			return
 		}
 
 		progressRelay := tui.NewProgressRelay()
 
-		m := tui.NewModel(ctx, tui.Options{
+		opts := tui.Options{
 			DryRun:            settings.DryRun,
 			NonStop:           settings.NonStop,
 			TimeoutMinutes:    settings.TimeoutMinutes,
@@ -86,15 +99,25 @@ var rootCmd = &cobra.Command{
 			SelectManagers:    settings.SelectManagers,
 			PreviousDurations: previousDurations,
 			ProgressRelay:     progressRelay,
-		})
+			Animations:        settings.Animations,
+			AltScreen:         settings.AltScreen,
+			ASCII:             settings.ASCII,
+			Version:           version,
+		}
+		if demoMode {
+			opts.Managers = ecosystem.NewDemoManagers()
+		}
+
+		m := tui.NewModel(ctx, opts)
 
 		p := tea.NewProgram(m)
 		progressRelay.Bind(p.Send)
 
 		finalModel, err := p.Run()
+		progressRelay.Close()
 		if err != nil {
 			logger.Error("Error running UI: %v", err)
-			fmt.Printf("Fatal error: %v\n", err)
+			tui.Fprintf(os.Stderr, "Fatal error: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -103,32 +126,53 @@ var rootCmd = &cobra.Command{
 			results := fm.GetResults()
 			rep := buildReportFromTui(results, settings, build, start)
 			if settings.JSON {
-				_ = report.WriteReport(rep)
+				if err := report.WriteReport(rep); err != nil {
+					logger.Error("Failed to write JSON report: %v", err)
+				}
 			} else if len(results) > 0 {
 				printPrettyResults(results)
 			}
-			finalizeRun(settings, rep)
+			if !demoMode {
+				finalizeRun(settings, rep)
+			}
 		}
 	},
+}
+
+// stdoutIsTerminal reports whether stdout is attached to a terminal.
+func stdoutIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// interruptContext returns a context that is cancelled by Ctrl+C. Commands run
+// through pkg/runner cancel their process trees when the context is done, so a
+// console interrupt stops package managers instead of orphaning them.
+func interruptContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt)
 }
 
 // runSilentMode runs all updates without the TUI.
 func runSilentMode(ctx context.Context, settings config.EffectiveSettings, build report.BuildInfo, startedAt time.Time) report.RunReport {
 	logger.Info("Running in silent mode")
 	if !settings.JSON {
-		fmt.Println()
-		fmt.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  silent mode"))
-		fmt.Println(tui.Divider())
-		fmt.Println()
+		tui.Println()
+		tui.Println(tui.MiniLogo() + tui.SubtleStyle.Render("  silent mode"))
+		tui.Println(tui.Divider())
+		tui.Println()
 	}
 
-	managers := ecosystem.GetDetectedManagers(ctx)
-	managers = ecosystem.FilterManagers(managers, settings.Only, settings.Exclude)
+	// Demo mode never touches real packages, in either UI mode.
+	var managers []ecosystem.PackageManager
+	if demoMode {
+		managers = ecosystem.NewDemoManagers()
+	} else {
+		managers = ecosystem.DetectFiltered(ctx, settings.Only, settings.Exclude, nil)
+	}
 
 	if len(managers) == 0 {
 		if !settings.JSON {
-			fmt.Println(tui.WarningStyle.Render("  ⚠ No package managers detected."))
-			fmt.Println()
+			tui.Println(tui.WarningStyle.Render("  ⚠ No package managers detected."))
+			tui.Println()
 		}
 		endedAt := time.Now()
 		return report.BuildRunReport("silent", settings.Profile, startedAt, endedAt, build, nil)
@@ -139,9 +183,13 @@ func runSilentMode(ctx context.Context, settings config.EffectiveSettings, build
 	failCount := 0
 
 	for _, m := range managers {
+		if ctx.Err() != nil {
+			break
+		}
+
 		if settings.DryRun {
 			if !settings.JSON {
-				fmt.Printf("%s %s  %s\n", tui.Bullet(), tui.BoldStyle.Render(m.Name()), tui.SubtleStyle.Render("(dry-run: skipped)"))
+				tui.Printf("%s %s  %s\n", tui.Bullet(), tui.BoldStyle.Render(m.Name()), tui.SubtleStyle.Render("(dry-run: skipped)"))
 			}
 			results = append(results, report.ManagerResult{Manager: m.Name(), Success: true, Message: "dry-run skipped", Updated: 0})
 			successCount++
@@ -165,15 +213,15 @@ func runSilentMode(ctx context.Context, settings config.EffectiveSettings, build
 			if res.Success {
 				successCount++
 				if res.Updated > 0 {
-					fmt.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(m.Name()), tui.SubtleStyle.Render(fmt.Sprintf("(%d updated)", res.Updated)))
+					tui.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(m.Name()), tui.SubtleStyle.Render(fmt.Sprintf("(%d updated)", res.Updated)))
 				} else {
-					fmt.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(m.Name()), tui.SubtleStyle.Render(res.Message))
+					tui.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(m.Name()), tui.SubtleStyle.Render(res.Message))
 				}
 			} else {
 				failCount++
-				fmt.Printf("%s %s  %s\n", tui.Crossmark(), tui.BoldStyle.Render(m.Name()), tui.ErrorStyle.Render(res.Message))
+				tui.Printf("%s %s  %s\n", tui.Crossmark(), tui.BoldStyle.Render(m.Name()), tui.ErrorStyle.Render(res.Message))
 				if res.Error != nil {
-					fmt.Printf("    %s\n", tui.SubtleStyle.Render(res.Error.Error()))
+					tui.Printf("    %s\n", tui.SubtleStyle.Render(res.Error.Error()))
 				}
 			}
 		}
@@ -184,17 +232,22 @@ func runSilentMode(ctx context.Context, settings config.EffectiveSettings, build
 
 	if !settings.JSON {
 		elapsed := endedAt.Sub(startedAt).Round(time.Millisecond)
-		fmt.Println()
-		fmt.Println(tui.Divider())
-		fmt.Printf("  %s updated, %s failed  %s\n",
+		tui.Println()
+		tui.Println(tui.Divider())
+		if ctx.Err() != nil {
+			tui.Println("  " + tui.WarningStyle.Render("⚠ Cancelled by user — remaining ecosystems were stopped."))
+		}
+		tui.Printf("  %s updated, %s failed  %s\n",
 			tui.SuccessStyle.Render(fmt.Sprintf("%d", successCount)),
 			tui.ErrorStyle.Render(fmt.Sprintf("%d", failCount)),
 			tui.SubtleStyle.Render(fmt.Sprintf("(%s)", elapsed)))
-		fmt.Println()
+		tui.Println()
 	}
 
 	if settings.JSON {
-		_ = report.WriteReport(rep)
+		if err := report.WriteReport(rep); err != nil {
+			logger.Error("Failed to write JSON report: %v", err)
+		}
 	}
 
 	return rep
@@ -214,28 +267,28 @@ func printPrettyResults(results []tui.UpdateMsg) {
 		}
 	}
 
-	fmt.Println()
-	fmt.Println(tui.Divider())
-	fmt.Println()
+	tui.Println()
+	tui.Println(tui.Divider())
+	tui.Println()
 
 	for _, res := range results {
 		if res.Result.Success {
 			if res.Result.Updated > 0 {
-				fmt.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(res.ManagerName), tui.SubtleStyle.Render(fmt.Sprintf("(%d updated)", res.Result.Updated)))
+				tui.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(res.ManagerName), tui.SubtleStyle.Render(fmt.Sprintf("(%d updated)", res.Result.Updated)))
 			} else {
-				fmt.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(res.ManagerName), tui.SubtleStyle.Render(res.Result.Message))
+				tui.Printf("%s %s  %s\n", tui.Checkmark(), tui.BoldStyle.Render(res.ManagerName), tui.SubtleStyle.Render(res.Result.Message))
 			}
 		} else {
-			fmt.Printf("%s %s  %s\n", tui.Crossmark(), tui.BoldStyle.Render(res.ManagerName), tui.ErrorStyle.Render(res.Result.Message))
+			tui.Printf("%s %s  %s\n", tui.Crossmark(), tui.BoldStyle.Render(res.ManagerName), tui.ErrorStyle.Render(res.Result.Message))
 		}
 	}
 
-	fmt.Println()
-	fmt.Printf("  %s ecosystems, %s packages updated, %s failed\n",
+	tui.Println()
+	tui.Printf("  %s ecosystems, %s packages updated, %s failed\n",
 		tui.HighlightStyle.Render(fmt.Sprintf("%d", len(results))),
 		tui.SuccessStyle.Render(fmt.Sprintf("%d", totalUpdated)),
 		tui.ErrorStyle.Render(fmt.Sprintf("%d", failCount)))
-	fmt.Println()
+	tui.Println()
 }
 
 func init() {
@@ -256,6 +309,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&selectManagers, "select", false, "Select managers interactively")
 	rootCmd.PersistentFlags().BoolVar(&notifyEnabled, "notify", false, "Show a desktop notification on completion")
 	rootCmd.PersistentFlags().BoolVar(&notifyOnFailure, "notify-on-failure", true, "Only notify when failures occur")
+	rootCmd.PersistentFlags().BoolVar(&demoMode, "demo", false, "Run the UI against simulated package managers (no real updates)")
+	_ = rootCmd.PersistentFlags().MarkHidden("demo")
 }
 
 func runSilentWithRetries(ctx context.Context, manager ecosystem.PackageManager, settings config.EffectiveSettings) ecosystem.Result {
@@ -317,7 +372,11 @@ func finalizeRun(settings config.EffectiveSettings, rep report.RunReport) {
 		logger.Error("Failed to save last report: %v", err)
 	}
 
-	updatedState := state.UpdateFromReport(rep)
+	prevState, _, err := state.Load("")
+	if err != nil {
+		logger.Error("Failed to load previous state for merge: %v", err)
+	}
+	updatedState := state.UpdateFromReport(prevState, rep)
 	if _, err := state.Save("", updatedState); err != nil {
 		logger.Error("Failed to save run state: %v", err)
 	}
@@ -336,7 +395,7 @@ func finalizeRun(settings config.EffectiveSettings, rep report.RunReport) {
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		tui.Println(err)
 		os.Exit(1)
 	}
 }

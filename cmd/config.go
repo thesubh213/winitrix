@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 
 	"github.com/spf13/cobra"
 	"github.com/thesubh213/winitrix/pkg/config"
 	"github.com/thesubh213/winitrix/pkg/paths"
+	"github.com/thesubh213/winitrix/pkg/tui"
 )
 
 var (
@@ -28,13 +28,13 @@ var configInitCmd = &cobra.Command{
 		path, err := config.WriteDefaultConfig(configInitPath, configInitForce)
 		if err != nil {
 			if errors.Is(err, os.ErrExist) {
-				fmt.Println("Config already exists. Use --force to overwrite.")
+				tui.Println("Config already exists. Use --force to overwrite.")
 				return
 			}
-			fmt.Printf("Failed to write config: %v\n", err)
+			tui.Printf("Failed to write config: %v\n", err)
 			return
 		}
-		fmt.Printf("Config written to: %s\n", path)
+		tui.Printf("Config written to: %s\n", path)
 	},
 }
 
@@ -44,10 +44,10 @@ var configPathCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		path, err := paths.DefaultConfigPath()
 		if err != nil {
-			fmt.Printf("Failed to resolve config path: %v\n", err)
+			tui.Printf("Failed to resolve config path: %v\n", err)
 			return
 		}
-		fmt.Println(path)
+		tui.Println(path)
 	},
 }
 
@@ -61,17 +61,17 @@ var configEditCmd = &cobra.Command{
 			var err error
 			path, err = paths.DefaultConfigPath()
 			if err != nil {
-				fmt.Printf("Failed to resolve config path: %v\n", err)
+				tui.Printf("Failed to resolve config path: %v\n", err)
 				return
 			}
 		}
 
 		// Ensure config exists
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			fmt.Println("Config file does not exist. Creating default starter config...")
+			tui.Println("Config file does not exist. Creating default starter config...")
 			_, err = config.WriteDefaultConfig(path, false)
 			if err != nil {
-				fmt.Printf("Failed to write default config: %v\n", err)
+				tui.Printf("Failed to write default config: %v\n", err)
 				return
 			}
 		}
@@ -85,7 +85,7 @@ var configEditCmd = &cobra.Command{
 			editor = "notepad.exe"
 		}
 
-		fmt.Printf("Opening config file at: %s with '%s'...\n", path, editor)
+		tui.Printf("Opening config file at: %s with '%s'...\n", path, editor)
 
 		editorCmd := exec.Command(editor, path)
 		editorCmd.Stdin = os.Stdin
@@ -93,7 +93,7 @@ var configEditCmd = &cobra.Command{
 		editorCmd.Stderr = os.Stderr
 
 		if err := editorCmd.Run(); err != nil {
-			fmt.Printf("Failed to launch editor: %v\n", err)
+			tui.Printf("Failed to launch editor: %v\n", err)
 		}
 	},
 }

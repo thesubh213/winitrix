@@ -2,7 +2,6 @@ package ecosystem
 
 import (
 	"context"
-	"regexp"
 	"strings"
 
 	"github.com/thesubh213/winitrix/pkg/elevation"
@@ -62,15 +61,7 @@ func (m *NpmManager) UpdateAll(ctx context.Context) Result {
 func (m *NpmManager) UpdateAllWithProgress(ctx context.Context, progressCb runner.ProgressCallback) Result {
 	logger.Debug("Starting npm update with progress tracking")
 
-	// Create a progress callback that parses npm output
-	wrappedCallback := func(line string) {
-		if progressCb != nil {
-			progressCb(line)
-		}
-		parseNpmProgress(line)
-	}
-
-	streamRes := runner.RunWithProgress(ctx, wrappedCallback, "npm", "update", "-g")
+	streamRes := runner.RunWithProgress(ctx, progressCb, "npm", "update", "-g")
 
 	if streamRes.Err != nil {
 		if elevation.CheckAdminRequirement(streamRes.Stdout + streamRes.Stderr) {
@@ -96,16 +87,6 @@ func (m *NpmManager) UpdateAllWithProgress(ctx context.Context, progressCb runne
 		Success: true,
 		Message: "Successfully updated global NPM packages",
 		Updated: updated,
-	}
-}
-
-// parseNpmProgress extracts package information from npm output
-func parseNpmProgress(line string) {
-	// Try to match package update messages
-	re := regexp.MustCompile(`(\w+)\s+\d+\.\d+\.\d+ -> (\d+\.\d+\.\d+)`)
-	matches := re.FindStringSubmatch(line)
-	if len(matches) > 1 {
-		logger.Debug("Updating npm package: %s -> %s", matches[1], matches[2])
 	}
 }
 
